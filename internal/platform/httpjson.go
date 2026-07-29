@@ -6,22 +6,22 @@ import (
 	"net/http"
 )
 
-// Erro e o corpo padrao de erro da API.
-type Erro struct {
-	Mensagem string `json:"error"`
-	Parceira string `json:"partner,omitempty"`
+// ErrorBody is the standard error body of the API.
+type ErrorBody struct {
+	Message string `json:"error"`
+	Partner string `json:"partner,omitempty"`
 }
 
-// EscreverJSON responde com o corpo serializado em JSON.
-func EscreverJSON(w http.ResponseWriter, status int, corpo any) {
+// WriteJSON replies with the body serialized as JSON.
+func WriteJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(corpo); err != nil {
-		log.Printf("falha ao escrever resposta: %v", err)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("failed to write response: %v", err)
 	}
 }
 
-// EscreverErro responde com o corpo de erro padrao.
-func EscreverErro(w http.ResponseWriter, status int, mensagem string) {
-	EscreverJSON(w, status, Erro{Mensagem: mensagem})
+// WriteError replies with the standard error body.
+func WriteError(w http.ResponseWriter, status int, message string) {
+	WriteJSON(w, status, ErrorBody{Message: message})
 }

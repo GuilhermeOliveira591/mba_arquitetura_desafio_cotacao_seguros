@@ -9,87 +9,88 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/platform"
 )
 
-// CabecalhoTenant identifica a corretora que esta pedindo a cotacao.
-const CabecalhoTenant = "X-Tenant-Id"
+// TenantHeader identifies the broker asking for the quote.
+const TenantHeader = "X-Tenant-Id"
 
-// limitePedido corta corpos absurdos antes de eles virarem memoria.
-const limitePedido = 1 << 20 // 1 MiB
+// requestLimit cuts off absurd bodies before they turn into memory.
+const requestLimit = 1 << 20 // 1 MiB
 
-// API expoe o contrato HTTP da quotation-api.
+// API exposes the HTTP contract of the quotation-api.
 type API struct {
-	servico *Servico
+	service *Service
 	tenants map[string]bool
 }
 
-func NovaAPI(servico *Servico, tenants []string) *API {
-	conhecidos := make(map[string]bool, len(tenants))
+func NewAPI(service *Service, tenants []string) *API {
+	known := make(map[string]bool, len(tenants))
 	for _, t := range tenants {
-		conhecidos[t] = true
+		known[t] = true
 	}
-	return &API{servico: servico, tenants: conhecidos}
+	return &API{service: service, tenants: known}
 }
 
-// Rotas monta o roteador da API.
+// Routes builds the API router.
 //
-//	POST /quotes   cotacao agregada das parceiras (exige X-Tenant-Id)
-//	GET  /healthz  saude do processo
-func (a *API) Rotas() http.Handler {
+//	POST /quotes   aggregated quote from the partners (requires X-Tenant-Id)
+//	GET  /healthz  process health
+func (a *API) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /quotes", a.cotar)
+	mux.HandleFunc("POST /quotes", a.quote)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		platform.EscreverJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		platform.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	return mux
 }
 
-func (a *API) cotar(w http.ResponseWriter, r *http.Request) {
-	tenant := r.Header.Get(CabecalhoTenant)
+func (a *API) quote(w http.ResponseWriter, r *http.Request) {
+	tenant := r.Header.Get(TenantHeader)
 	if tenant == "" {
-		platform.EscreverErro(w, http.StatusBadRequest, CabecalhoTenant+" e obrigatorio")
+		platform.WriteError(w, http.StatusBadRequest, TenantHeader+" is required")
 		return
 	}
-	// Corretora desconhecida nao e "nao autenticado", e "nao e sua". O isolamento entre corretoras e
-	// requisito do cenario (SUSEP e LGPD), nao detalhe de implementacao.
+	// An unknown broker is not "unauthenticated", it is "not yours". Isolation between brokers is a
+	// requirement of the scenario (SUSEP and LGPD), not an implementation detail.
 	if !a.tenants[tenant] {
-		platform.EscreverErro(w, http.StatusForbidden, "corretora nao habilitada nesta plataforma")
+		platform.WriteError(w, http.StatusForbidden, "broker not enabled on this platform")
 		return
 	}
 
-	var pedido Pedido
-	decodificador := json.NewDecoder(http.MaxBytesReader(w, r.Body, limitePedido))
-	decodificador.DisallowUnknownFields()
-	if err := decodificador.Decode(&pedido); err != nil {
-		platform.EscreverErro(w, http.StatusBadRequest, "corpo invalido: "+err.Error())
+	var request Request
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, requestLimit))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		platform.WriteError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	if err := pedido.Normalizar(); err != nil {
-		platform.EscreverErro(w, http.StatusBadRequest, err.Error())
+	if err := request.Normalize(); err != nil {
+		platform.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	resposta, err := a.servico.Cotar(r.Context(), tenant, pedido)
+	response, err := a.service.Quote(r.Context(), tenant, request)
 	if err != nil {
-		a.responderFalhaDeParceira(w, err)
+		a.respondPartnerFailure(w, err)
 		return
 	}
 
 	w.Header().Set("X-Tenant-Id", tenant)
-	platform.EscreverJSON(w, http.StatusOK, resposta)
+	platform.WriteJSON(w, http.StatusOK, response)
 }
 
-// responderFalhaDeParceira traduz a falha da dependencia externa em 502 — e diz de quem foi.
+// respondPartnerFailure translates the failure of the external dependency into a 502 — and says
+// whose fault it was.
 //
-// Uma unica parceira fora derruba a requisicao inteira. E o comportamento ingenuo de proposito: sem
-// circuit breaker, sem fallback e sem cache, a disponibilidade da plataforma e o produto da
-// disponibilidade das tres parceiras.
-func (a *API) responderFalhaDeParceira(w http.ResponseWriter, err error) {
-	var falha *partner.Erro
-	if errors.As(err, &falha) {
-		platform.EscreverJSON(w, http.StatusBadGateway, platform.Erro{
-			Mensagem: "seguradora parceira indisponivel",
-			Parceira: falha.Parceira,
+// A single partner being down brings down the entire request. That is the deliberately naive
+// behavior: with no circuit breaker, no fallback and no cache, the availability of the platform is
+// the product of the availability of the three partners.
+func (a *API) respondPartnerFailure(w http.ResponseWriter, err error) {
+	var failure *partner.Error
+	if errors.As(err, &failure) {
+		platform.WriteJSON(w, http.StatusBadGateway, platform.ErrorBody{
+			Message: "partner insurer unavailable",
+			Partner: failure.Partner,
 		})
 		return
 	}
-	platform.EscreverErro(w, http.StatusBadGateway, "falha ao consultar as seguradoras parceiras")
+	platform.WriteError(w, http.StatusBadGateway, "failed to query the partner insurers")
 }

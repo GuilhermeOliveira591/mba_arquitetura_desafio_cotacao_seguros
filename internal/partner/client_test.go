@@ -12,92 +12,93 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/platform"
 )
 
-func parceiraDeTeste(h http.Handler) (platform.Parceira, func()) {
-	servidor := httptest.NewServer(h)
-	return platform.Parceira{Nome: "partner-flaky", BaseURL: servidor.URL}, servidor.Close
+func testPartner(h http.Handler) (platform.Partner, func()) {
+	server := httptest.NewServer(h)
+	return platform.Partner{Name: "partner-flaky", BaseURL: server.URL}, server.Close
 }
 
-func TestCotarLeARespostaDaParceira(t *testing.T) {
-	var caminho, tipo string
-	var recebido map[string]any
+func TestQuoteReadsThePartnerResponse(t *testing.T) {
+	var path, contentType string
+	var received map[string]any
 
-	parceira, fechar := parceiraDeTeste(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		caminho, tipo = r.URL.Path, r.Header.Get("Content-Type")
-		corpo, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(corpo, &recebido)
+	p, closeServer := testPartner(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, contentType = r.URL.Path, r.Header.Get("Content-Type")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &received)
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"partner":"ignorado","quote_id":"q-1","premium_cents":123456,` +
+		_, _ = w.Write([]byte(`{"partner":"ignored","quote_id":"q-1","premium_cents":123456,` +
 			`"currency":"BRL","coverage_cents":5000000,"valid_for_seconds":300}`))
 	}))
-	defer fechar()
+	defer closeServer()
 
-	cotacao, err := NovoCliente().Cotar(context.Background(), parceira, map[string]string{"broker": "corretora-a"})
+	quote, err := NewClient().Quote(context.Background(), p, map[string]string{"broker": "corretora-a"})
 	if err != nil {
-		t.Fatalf("Cotar: %v", err)
+		t.Fatalf("Quote: %v", err)
 	}
 
-	if caminho != "/quotes" {
-		t.Errorf("caminho %q, esperado /quotes", caminho)
+	if path != "/quotes" {
+		t.Errorf("path %q, want /quotes", path)
 	}
-	if tipo != "application/json" {
-		t.Errorf("Content-Type %q, esperado application/json", tipo)
+	if contentType != "application/json" {
+		t.Errorf("Content-Type %q, want application/json", contentType)
 	}
-	if recebido["broker"] != "corretora-a" {
-		t.Errorf("parceira recebeu broker %v, esperado corretora-a", recebido["broker"])
+	if received["broker"] != "corretora-a" {
+		t.Errorf("partner received broker %v, want corretora-a", received["broker"])
 	}
-	if cotacao.PremioCentavos != 123456 || cotacao.CotacaoID != "q-1" {
-		t.Errorf("cotacao lida errado: %+v", cotacao)
+	if quote.PremiumCents != 123456 || quote.QuoteID != "q-1" {
+		t.Errorf("quote read incorrectly: %+v", quote)
 	}
-	// O nome vem da configuracao, nao do que a parceira disser de si mesma.
-	if cotacao.Parceira != "partner-flaky" {
-		t.Errorf("parceira %q, esperada partner-flaky", cotacao.Parceira)
+	// The name comes from the configuration, not from whatever the partner says about itself.
+	if quote.Partner != "partner-flaky" {
+		t.Errorf("partner %q, want partner-flaky", quote.Partner)
 	}
 }
 
-func TestCotarIdentificaAParceiraQueFalhou(t *testing.T) {
-	parceira, fechar := parceiraDeTeste(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, `{"error":"parceira indisponivel"}`, http.StatusServiceUnavailable)
+func TestQuoteIdentifiesThePartnerThatFailed(t *testing.T) {
+	p, closeServer := testPartner(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"partner unavailable"}`, http.StatusServiceUnavailable)
 	}))
-	defer fechar()
+	defer closeServer()
 
-	_, err := NovoCliente().Cotar(context.Background(), parceira, map[string]string{})
+	_, err := NewClient().Quote(context.Background(), p, map[string]string{})
 	if err == nil {
-		t.Fatal("503 da parceira foi tratado como sucesso")
+		t.Fatal("a 503 from the partner was treated as success")
 	}
 
-	var falha *Erro
-	if !errors.As(err, &falha) {
-		t.Fatalf("erro %v nao e *partner.Erro", err)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("error %v is not a *partner.Error", err)
 	}
-	if falha.Parceira != "partner-flaky" || falha.Status != http.StatusServiceUnavailable {
-		t.Fatalf("erro nao identifica a falha: %+v", falha)
+	if failure.Partner != "partner-flaky" || failure.Status != http.StatusServiceUnavailable {
+		t.Fatalf("error does not identify the failure: %+v", failure)
 	}
 }
 
-func TestCotarFalhaComRespostaIlegivel(t *testing.T) {
-	parceira, fechar := parceiraDeTeste(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("nao sou json"))
+func TestQuoteFailsOnUnreadableResponse(t *testing.T) {
+	p, closeServer := testPartner(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
 	}))
-	defer fechar()
+	defer closeServer()
 
-	if _, err := NovoCliente().Cotar(context.Background(), parceira, map[string]string{}); err == nil {
-		t.Fatal("resposta ilegivel foi aceita")
+	if _, err := NewClient().Quote(context.Background(), p, map[string]string{}); err == nil {
+		t.Fatal("unreadable response was accepted")
 	}
 }
 
-// TestCotarRespeitaOCancelamento mostra que a unica protecao existente hoje e a que vem do chamador:
-// nao ha timeout proprio no cliente — e isso e o vazio proposital do starter.
-func TestCotarRespeitaOCancelamento(t *testing.T) {
-	parceira, fechar := parceiraDeTeste(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// TestQuoteHonoursCancellation shows that the only protection in place today is the one coming from
+// the caller: there is no timeout of its own in the client — and that is the deliberate emptiness of
+// the starter.
+func TestQuoteHonoursCancellation(t *testing.T) {
+	p, closeServer := testPartner(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
-	defer fechar()
+	defer closeServer()
 
-	ctx, cancelar := context.WithCancel(context.Background())
-	cancelar()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	if _, err := NovoCliente().Cotar(ctx, parceira, map[string]string{}); err == nil {
-		t.Fatal("contexto cancelado nao interrompeu a chamada")
+	if _, err := NewClient().Quote(ctx, p, map[string]string{}); err == nil {
+		t.Fatal("cancelled context did not interrupt the call")
 	}
 }

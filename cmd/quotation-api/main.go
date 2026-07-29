@@ -1,14 +1,14 @@
-// Command quotation-api e a API de cotacao de seguros multi-tenant do starter.
+// Command quotation-api is the multi-tenant insurance quotation API of the starter.
 //
-// Ela recebe um pedido de cotacao de uma corretora e consulta as seguradoras parceiras, agregando as
-// respostas. Funciona — e funciona mal de proposito: as parceiras sao consultadas em serie, sem
-// timeout, sem circuit breaker, sem cache e sem fallback. Esse vazio e o enunciado do desafio, nao um
-// esquecimento; ver internal/quotation/servico.go e internal/partner/client.go.
+// It takes a quote request from a broker and calls the partner insurers, aggregating the responses.
+// It works — and it works badly on purpose: the partners are called serially, with no timeout, no
+// circuit breaker, no cache and no fallback. That emptiness is the challenge statement, not an
+// oversight; see internal/quotation/service.go and internal/partner/client.go.
 //
-// Contrato:
+// Contract:
 //
-//	POST /quotes   cotacao agregada das parceiras (exige o cabecalho X-Tenant-Id)
-//	GET  /healthz  saude do processo
+//	POST /quotes   aggregated quote from the partners (requires the X-Tenant-Id header)
+//	GET  /healthz  health of the process
 package main
 
 import (
@@ -27,38 +27,38 @@ import (
 )
 
 func main() {
-	cfg, err := platform.CarregarConfig(platform.Ambiente())
+	cfg, err := platform.LoadConfig(platform.Environment())
 	if err != nil {
-		log.Fatalf("configuracao invalida: %v", err)
+		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	api := quotation.NovaAPI(
-		quotation.NovoServico(cfg.Parceiras, partner.NovoCliente()),
+	api := quotation.NewAPI(
+		quotation.NewService(cfg.Partners, partner.NewClient()),
 		cfg.Tenants,
 	)
 
-	servidor := &http.Server{
-		Addr:              ":" + cfg.Porta,
-		Handler:           api.Rotas(),
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           api.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, pararEscuta := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer pararEscuta()
+	ctx, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopListening()
 
 	go func() {
 		<-ctx.Done()
-		log.Print("quotation-api: sinal recebido, encerrando")
-		desligamento, cancelar := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancelar()
-		if err := servidor.Shutdown(desligamento); err != nil {
-			log.Printf("quotation-api: desligamento forcado: %v", err)
+		log.Print("quotation-api: signal received, shutting down")
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			log.Printf("quotation-api: forced shutdown: %v", err)
 		}
 	}()
 
-	log.Printf("quotation-api ouvindo em %s | parceiras=%d corretoras=%v",
-		servidor.Addr, len(cfg.Parceiras), cfg.Tenants)
-	if err := servidor.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("servidor encerrou: %v", err)
+	log.Printf("quotation-api listening on %s | partners=%d brokers=%v",
+		server.Addr, len(cfg.Partners), cfg.Tenants)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("server stopped: %v", err)
 	}
 }

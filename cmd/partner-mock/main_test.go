@@ -10,141 +10,142 @@ import (
 	"time"
 )
 
-func pedirCotacao(t *testing.T, h http.Handler, corpo string) *httptest.ResponseRecorder {
+func requestQuote(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/quotes", strings.NewReader(corpo))
-	resposta := httptest.NewRecorder()
-	h.ServeHTTP(resposta, req)
-	return resposta
+	req := httptest.NewRequest(http.MethodPost, "/quotes", strings.NewReader(body))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, req)
+	return response
 }
 
-func TestCotarRespondeCotacaoQuandoAParceiraEstaSa(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.Latencia, cfg.Jitter, cfg.TaxaFalha = 0, 0, 0
-	h := rotas(cfg, NovoComportamento(cfg))
+func TestQuoteRespondsWithAQuoteWhenThePartnerIsHealthy(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.Latency, cfg.Jitter, cfg.FailureRate = 0, 0, 0
+	h := routes(cfg, NewBehavior(cfg))
 
-	resposta := pedirCotacao(t, h, `{"tenant_id":"corretora-a"}`)
-	if resposta.Code != http.StatusOK {
-		t.Fatalf("status %d, esperado 200", resposta.Code)
-	}
-
-	var cotacao Cotacao
-	if err := json.Unmarshal(resposta.Body.Bytes(), &cotacao); err != nil {
-		t.Fatalf("resposta nao e uma cotacao: %v", err)
-	}
-	if cotacao.Parceira != cfg.Nome || cotacao.CotacaoID == "" || cotacao.PremioCentavos == 0 {
-		t.Fatalf("cotacao incompleta: %+v", cotacao)
+	response := requestQuote(t, h, `{"tenant_id":"broker-a"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d, expected 200", response.Code)
 	}
 
-	if got := resposta.Header().Get("X-Partner-Seq"); got != "1" {
-		t.Errorf("X-Partner-Seq %q, esperado 1", got)
+	var quote Quote
+	if err := json.Unmarshal(response.Body.Bytes(), &quote); err != nil {
+		t.Fatalf("response is not a quote: %v", err)
 	}
-	if got := resposta.Header().Get("X-Partner-Name"); got != cfg.Nome {
-		t.Errorf("X-Partner-Name %q, esperado %q", got, cfg.Nome)
-	}
-	if got := resposta.Header().Get("X-Partner-Inflight"); got != "1" {
-		t.Errorf("X-Partner-Inflight %q, esperado 1", got)
-	}
-}
-
-func TestCotarFalhaComOStatusConfigurado(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.Latencia, cfg.Jitter, cfg.TaxaFalha, cfg.StatusFalha = 0, 0, 1, 502
-	h := rotas(cfg, NovoComportamento(cfg))
-
-	resposta := pedirCotacao(t, h, `{}`)
-	if resposta.Code != 502 {
-		t.Fatalf("status %d, esperado 502", resposta.Code)
+	if quote.Partner != cfg.Name || quote.QuoteID == "" || quote.PremiumCents == 0 {
+		t.Fatalf("incomplete quote: %+v", quote)
 	}
 
-	var erro erroJSON
-	if err := json.Unmarshal(resposta.Body.Bytes(), &erro); err != nil {
-		t.Fatalf("resposta de erro nao e JSON: %v", err)
+	if got := response.Header().Get("X-Partner-Seq"); got != "1" {
+		t.Errorf("X-Partner-Seq %q, expected 1", got)
 	}
-	if erro.Parceira != cfg.Nome || erro.Erro == "" {
-		t.Fatalf("erro incompleto: %+v", erro)
+	if got := response.Header().Get("X-Partner-Name"); got != cfg.Name {
+		t.Errorf("X-Partner-Name %q, expected %q", got, cfg.Name)
+	}
+	if got := response.Header().Get("X-Partner-Inflight"); got != "1" {
+		t.Errorf("X-Partner-Inflight %q, expected 1", got)
 	}
 }
 
-func TestCotarAplicaALatenciaDoPerfil(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.Latencia, cfg.Jitter, cfg.TaxaFalha = 80*time.Millisecond, 0, 0
-	h := rotas(cfg, NovoComportamento(cfg))
+func TestQuoteFailsWithTheConfiguredStatus(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.Latency, cfg.Jitter, cfg.FailureRate, cfg.FailureStatus = 0, 0, 1, 502
+	h := routes(cfg, NewBehavior(cfg))
 
-	inicio := time.Now()
-	resposta := pedirCotacao(t, h, `{}`)
-	decorrido := time.Since(inicio)
-
-	if decorrido < cfg.Latencia {
-		t.Fatalf("resposta levou %s, esperado ao menos %s", decorrido, cfg.Latencia)
+	response := requestQuote(t, h, `{}`)
+	if response.Code != 502 {
+		t.Fatalf("status %d, expected 502", response.Code)
 	}
-	if got := resposta.Header().Get("X-Partner-Latency-Ms"); got != "80" {
-		t.Errorf("X-Partner-Latency-Ms %q, esperado 80", got)
+
+	var failure jsonError
+	if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
+		t.Fatalf("error response is not JSON: %v", err)
+	}
+	if failure.Partner != cfg.Name || failure.Error == "" {
+		t.Fatalf("incomplete error: %+v", failure)
 	}
 }
 
-// TestCotarDesisteQuandoOClienteDesiste protege o comportamento que o aluno vai exercitar com timeout
-// e circuit breaker: a parceira lenta nao pode segurar goroutine de requisicao ja abandonada.
-func TestCotarDesisteQuandoOClienteDesiste(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.Latencia, cfg.Jitter, cfg.TaxaFalha = 5*time.Second, 0, 0
-	comportamento := NovoComportamento(cfg)
-	h := rotas(cfg, comportamento)
+func TestQuoteAppliesTheProfileLatency(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.Latency, cfg.Jitter, cfg.FailureRate = 80*time.Millisecond, 0, 0
+	h := routes(cfg, NewBehavior(cfg))
 
-	ctx, cancelar := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancelar()
+	start := time.Now()
+	response := requestQuote(t, h, `{}`)
+	elapsed := time.Since(start)
+
+	if elapsed < cfg.Latency {
+		t.Fatalf("response took %s, expected at least %s", elapsed, cfg.Latency)
+	}
+	if got := response.Header().Get("X-Partner-Latency-Ms"); got != "80" {
+		t.Errorf("X-Partner-Latency-Ms %q, expected 80", got)
+	}
+}
+
+// TestQuoteGivesUpWhenTheClientGivesUp protects the behavior the student is going to exercise with
+// timeout and circuit breaker: the slow partner must not hold on to the goroutine of a request that
+// has already been abandoned.
+func TestQuoteGivesUpWhenTheClientGivesUp(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.Latency, cfg.Jitter, cfg.FailureRate = 5*time.Second, 0, 0
+	behavior := NewBehavior(cfg)
+	h := routes(cfg, behavior)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
 	req := httptest.NewRequest(http.MethodPost, "/quotes", strings.NewReader(`{}`)).WithContext(ctx)
 
-	inicio := time.Now()
+	start := time.Now()
 	h.ServeHTTP(httptest.NewRecorder(), req)
-	if decorrido := time.Since(inicio); decorrido > time.Second {
-		t.Fatalf("handler levou %s depois do cliente desistir", decorrido)
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("handler took %s after the client gave up", elapsed)
 	}
-	if emVoo := comportamento.EmVoo(); emVoo != 0 {
-		t.Fatalf("%d requisicoes em voo depois do cancelamento, esperado 0", emVoo)
-	}
-}
-
-// TestHealthzIgnoraOPerfil e o que mantem o `docker compose up` viavel: uma parceira com 5s de
-// latencia e 100% de falha ainda precisa subir saudavel.
-func TestHealthzIgnoraOPerfil(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.Latencia, cfg.TaxaFalha = 5*time.Second, 1
-	h := rotas(cfg, NovoComportamento(cfg))
-
-	inicio := time.Now()
-	resposta := httptest.NewRecorder()
-	h.ServeHTTP(resposta, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-
-	if resposta.Code != http.StatusOK {
-		t.Fatalf("status %d, esperado 200", resposta.Code)
-	}
-	if decorrido := time.Since(inicio); decorrido > time.Second {
-		t.Fatalf("healthz levou %s — o perfil vazou para o healthcheck", decorrido)
+	if inFlight := behavior.InFlight(); inFlight != 0 {
+		t.Fatalf("%d requests in flight after the cancellation, expected 0", inFlight)
 	}
 }
 
-func TestConfigExpoeOPerfilEfetivo(t *testing.T) {
-	cfg := perfilFlaky()
-	h := rotas(cfg, NovoComportamento(cfg))
+// TestHealthzIgnoresTheProfile is what keeps `docker compose up` viable: a partner with 5s of
+// latency and 100% failure still has to come up healthy.
+func TestHealthzIgnoresTheProfile(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.Latency, cfg.FailureRate = 5*time.Second, 1
+	h := routes(cfg, NewBehavior(cfg))
 
-	resposta := httptest.NewRecorder()
-	h.ServeHTTP(resposta, httptest.NewRequest(http.MethodGet, "/config", nil))
-	if resposta.Code != http.StatusOK {
-		t.Fatalf("status %d, esperado 200", resposta.Code)
+	start := time.Now()
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d, expected 200", response.Code)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("healthz took %s — the profile leaked into the healthcheck", elapsed)
+	}
+}
+
+func TestConfigExposesTheEffectiveProfile(t *testing.T) {
+	cfg := flakyProfile()
+	h := routes(cfg, NewBehavior(cfg))
+
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/config", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d, expected 200", response.Code)
 	}
 
-	var corpo map[string]any
-	if err := json.Unmarshal(resposta.Body.Bytes(), &corpo); err != nil {
-		t.Fatalf("resposta nao e JSON: %v", err)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
 	}
-	if corpo["partner"] != cfg.Nome {
-		t.Errorf("partner %v, esperado %q", corpo["partner"], cfg.Nome)
+	if body["partner"] != cfg.Name {
+		t.Errorf("partner %v, expected %q", body["partner"], cfg.Name)
 	}
-	if corpo["failure_rate"] != cfg.TaxaFalha {
-		t.Errorf("failure_rate %v, esperado %v", corpo["failure_rate"], cfg.TaxaFalha)
+	if body["failure_rate"] != cfg.FailureRate {
+		t.Errorf("failure_rate %v, expected %v", body["failure_rate"], cfg.FailureRate)
 	}
-	if corpo["latency_ms"] != float64(cfg.Latencia.Milliseconds()) {
-		t.Errorf("latency_ms %v, esperado %d", corpo["latency_ms"], cfg.Latencia.Milliseconds())
+	if body["latency_ms"] != float64(cfg.Latency.Milliseconds()) {
+		t.Errorf("latency_ms %v, expected %d", body["latency_ms"], cfg.Latency.Milliseconds())
 	}
 }

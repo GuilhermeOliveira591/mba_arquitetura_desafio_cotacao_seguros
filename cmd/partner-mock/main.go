@@ -1,15 +1,15 @@
-// Command partner-mock e a seguradora parceira falsa do starter — a dependencia externa instavel
-// contra a qual o aluno vai construir circuit breaker, cache e fallback.
+// Command partner-mock is the starter's fake partner insurer — the unstable external dependency
+// against which the student is going to build circuit breaker, cache and fallback.
 //
-// E um binario so para os tres perfis do desafio. O que muda entre `partner-slow`, `partner-flaky` e
-// `partner-degrading` e configuracao, nao codigo: o mau comportamento mora no docker-compose.yml,
-// em um lugar unico e legivel, e o starter continua pequeno.
+// It is a single binary for the three profiles of the challenge. What changes between
+// `partner-slow`, `partner-flaky` and `partner-degrading` is configuration, not code: the
+// misbehavior lives in docker-compose.yml, in a single readable place, and the starter stays small.
 //
-// Contrato:
+// Contract:
 //
-//	POST /quotes   cotacao da parceira (aplica latencia, falha e degradacao do perfil)
-//	GET  /healthz  saude do processo — nunca degrada, nunca falha
-//	GET  /config   configuracao efetiva do perfil que esta rodando
+//	POST /quotes   partner quote (applies the profile's latency, failure and degradation)
+//	GET  /healthz  process health — never degrades, never fails
+//	GET  /config   effective configuration of the profile that is running
 package main
 
 import (
@@ -26,134 +26,136 @@ import (
 	"time"
 )
 
-// limitePedido corta pedidos absurdos antes de eles virarem memoria. O mock nao valida o conteudo do
-// pedido de proposito: quem cuida de tenant e de payload e a quotation-api, nao a parceira.
-const limitePedido = 1 << 20 // 1 MiB
+// requestLimit cuts off absurd requests before they turn into memory. The mock does not validate
+// the content of the request on purpose: taking care of tenant and payload is the quotation-api's
+// job, not the partner's.
+const requestLimit = 1 << 20 // 1 MiB
 
 func main() {
-	cfg, err := carregarConfig(os.Getenv)
+	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
-		log.Fatalf("configuracao invalida: %v", err)
+		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	comportamento := NovoComportamento(cfg)
-	servidor := &http.Server{
-		Addr:              ":" + cfg.Porta,
-		Handler:           rotas(cfg, comportamento),
+	behavior := NewBehavior(cfg)
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           routes(cfg, behavior),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, pararEscuta := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer pararEscuta()
+	ctx, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopListening()
 
 	go func() {
 		<-ctx.Done()
-		log.Printf("%s: sinal recebido, encerrando", cfg.Nome)
-		desligamento, cancelar := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancelar()
-		if err := servidor.Shutdown(desligamento); err != nil {
-			log.Printf("%s: desligamento forcado: %v", cfg.Nome, err)
+		log.Printf("%s: signal received, shutting down", cfg.Name)
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			log.Printf("%s: forced shutdown: %v", cfg.Name, err)
 		}
 	}()
 
-	log.Printf("%s ouvindo em %s | %s", cfg.Nome, servidor.Addr, cfg.Resumo())
-	if err := servidor.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("servidor encerrou: %v", err)
+	log.Printf("%s listening on %s | %s", cfg.Name, server.Addr, cfg.Summary())
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("server stopped: %v", err)
 	}
 }
 
-func rotas(cfg Config, comportamento *Comportamento) http.Handler {
+func routes(cfg Config, behavior *Behavior) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /quotes", cotar(cfg, comportamento))
-	mux.HandleFunc("GET /healthz", saude(cfg))
-	mux.HandleFunc("GET /config", configuracao(cfg))
+	mux.HandleFunc("POST /quotes", quoteHandler(cfg, behavior))
+	mux.HandleFunc("GET /healthz", healthHandler(cfg))
+	mux.HandleFunc("GET /config", configHandler(cfg))
 	return mux
 }
 
-// cotar e o unico endpoint que sofre o perfil: aplica a latencia decidida na chegada e so entao
-// responde — sucesso ou falha. Falhar depois de esperar e o caso ruim de verdade, o que consome o
-// timeout do cliente; falha instantanea seria facil demais de tolerar.
-func cotar(cfg Config, comportamento *Comportamento) http.HandlerFunc {
+// quoteHandler is the only endpoint that suffers the profile: it applies the latency decided on
+// arrival and only then responds — success or failure. Failing after waiting is the truly bad case,
+// the one that eats up the client's timeout; an instant failure would be far too easy to tolerate.
+func quoteHandler(cfg Config, behavior *Behavior) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		decisao := comportamento.Admitir()
-		defer comportamento.Concluir()
+		decision := behavior.Admit()
+		defer behavior.Complete()
 
-		pedido, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limitePedido))
+		request, err := io.ReadAll(http.MaxBytesReader(w, r.Body, requestLimit))
 		if err != nil {
-			responder(w, cfg, decisao, http.StatusRequestEntityTooLarge, erroJSON{
-				Erro:     "pedido excede o limite aceito pela parceira",
-				Parceira: cfg.Nome,
+			respond(w, cfg, decision, http.StatusRequestEntityTooLarge, jsonError{
+				Error:   "request exceeds the limit accepted by the partner",
+				Partner: cfg.Name,
 			})
 			return
 		}
 
-		if err := dormir(r.Context(), decisao.Latencia); err != nil {
-			// Cliente desistiu (timeout ou cancelamento) antes de a parceira responder. Nao ha para
-			// quem escrever: so libera a vaga pelo defer.
+		if err := sleep(r.Context(), decision.Latency); err != nil {
+			// The client gave up (timeout or cancellation) before the partner answered. There is
+			// nobody left to write to: just release the slot through the defer.
 			return
 		}
 
-		if decisao.Falha {
-			responder(w, cfg, decisao, cfg.StatusFalha, erroJSON{
-				Erro:     "parceira indisponivel",
-				Parceira: cfg.Nome,
+		if decision.Fail {
+			respond(w, cfg, decision, cfg.FailureStatus, jsonError{
+				Error:   "partner unavailable",
+				Partner: cfg.Name,
 			})
 			return
 		}
 
-		responder(w, cfg, decisao, http.StatusOK, comportamento.Cotar(pedido))
+		respond(w, cfg, decision, http.StatusOK, behavior.Quote(request))
 	}
 }
 
-// saude responde sempre, na hora. O healthcheck do compose nao pode enxergar o mau comportamento do
-// perfil, senao a parceira lenta jamais subiria "healthy" e o ambiente nao ficaria de pe.
-func saude(cfg Config) http.HandlerFunc {
+// healthHandler always answers, right away. The compose healthcheck must not see the profile's
+// misbehavior, otherwise the slow partner would never come up "healthy" and the environment would
+// never stand up.
+func healthHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		escreverJSON(w, http.StatusOK, map[string]string{"status": "ok", "partner": cfg.Nome})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "partner": cfg.Name})
 	}
 }
 
-func configuracao(cfg Config) http.HandlerFunc {
+func configHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		escreverJSON(w, http.StatusOK, cfg)
+		writeJSON(w, http.StatusOK, cfg)
 	}
 }
 
-type erroJSON struct {
-	Erro     string `json:"error"`
-	Parceira string `json:"partner"`
+type jsonError struct {
+	Error   string `json:"error"`
+	Partner string `json:"partner"`
 }
 
-// responder anexa a decisao do mock aos cabecalhos da resposta. E o atalho de diagnostico do starter:
-// da para ver o numero de sequencia, a latencia aplicada e a carga do momento sem abrir o Jaeger —
-// util justamente antes de o aluno instrumentar.
-func responder(w http.ResponseWriter, cfg Config, decisao Decisao, status int, corpo any) {
-	cabecalho := w.Header()
-	cabecalho.Set("X-Partner-Name", cfg.Nome)
-	cabecalho.Set("X-Partner-Seq", strconv.FormatUint(decisao.Sequencia, 10))
-	cabecalho.Set("X-Partner-Latency-Ms", strconv.FormatInt(decisao.Latencia.Milliseconds(), 10))
-	cabecalho.Set("X-Partner-Inflight", strconv.FormatInt(decisao.EmVoo, 10))
-	escreverJSON(w, status, corpo)
+// respond attaches the mock's decision to the response headers. It is the starter's diagnostic
+// shortcut: you can see the sequence number, the applied latency and the load of the moment without
+// opening Jaeger — useful precisely before the student instruments anything.
+func respond(w http.ResponseWriter, cfg Config, decision Decision, status int, body any) {
+	header := w.Header()
+	header.Set("X-Partner-Name", cfg.Name)
+	header.Set("X-Partner-Seq", strconv.FormatUint(decision.Sequence, 10))
+	header.Set("X-Partner-Latency-Ms", strconv.FormatInt(decision.Latency.Milliseconds(), 10))
+	header.Set("X-Partner-Inflight", strconv.FormatInt(decision.InFlight, 10))
+	writeJSON(w, status, body)
 }
 
-func escreverJSON(w http.ResponseWriter, status int, corpo any) {
+func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(corpo); err != nil {
-		log.Printf("falha ao escrever resposta: %v", err)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("failed to write response: %v", err)
 	}
 }
 
-// dormir espera respeitando o cancelamento do cliente — sem isso, uma parceira lenta seguraria
-// goroutines de requisicoes que ja foram embora.
-func dormir(ctx context.Context, d time.Duration) error {
+// sleep waits while respecting the client's cancellation — without it, a slow partner would hold on
+// to goroutines of requests that are already gone.
+func sleep(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return nil
 	}
-	temporizador := time.NewTimer(d)
-	defer temporizador.Stop()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
-	case <-temporizador.C:
+	case <-timer.C:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

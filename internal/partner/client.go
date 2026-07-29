@@ -1,9 +1,10 @@
-// Package partner e o cliente das seguradoras parceiras — a fronteira entre a quotation-api e a
-// dependencia externa instavel do desafio.
+// Package partner is the client of the partner insurers — the boundary between the quotation-api and
+// the unstable external dependency of the challenge.
 //
-// E aqui que o circuit breaker vai nascer. Hoje, de proposito, nao ha nenhuma protecao: sem timeout,
-// sem retry, sem breaker, sem fallback. Uma chamada sai, e o que voltar (ou nao voltar) e o que a API
-// entrega. Esse vazio e o exercicio, nao um esquecimento — ver a nota em Cliente.
+// This is where the circuit breaker will be born. Today, on purpose, there is no protection at all:
+// no timeout, no retry, no breaker, no fallback. A call goes out, and whatever comes back (or does
+// not come back) is what the API delivers. That emptiness is the exercise, not an oversight — see the
+// note on Client.
 package partner
 
 import (
@@ -17,82 +18,82 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/platform"
 )
 
-// Cotacao e a resposta de uma seguradora parceira.
-type Cotacao struct {
-	Parceira          string `json:"partner"`
-	CotacaoID         string `json:"quote_id"`
-	PremioCentavos    int64  `json:"premium_cents"`
-	Moeda             string `json:"currency"`
-	CoberturaCentavos int64  `json:"coverage_cents"`
-	ValidadeSegundos  int64  `json:"valid_for_seconds"`
+// Quote is the response of a partner insurer.
+type Quote struct {
+	Partner         string `json:"partner"`
+	QuoteID         string `json:"quote_id"`
+	PremiumCents    int64  `json:"premium_cents"`
+	Currency        string `json:"currency"`
+	CoverageCents   int64  `json:"coverage_cents"`
+	ValidForSeconds int64  `json:"valid_for_seconds"`
 }
 
-// Cliente fala HTTP com as parceiras.
+// Client speaks HTTP with the partners.
 //
-// O http.Client e deliberadamente cru: `Timeout` zero significa esperar para sempre. Uma parceira que
-// degrada ate 6s segura a goroutine da requisicao esse tempo inteiro, e nada aqui impede a proxima
-// chamada de fazer o mesmo. Colocar um timeout e a primeira coisa que o aluno vai querer fazer — e e
-// justamente o que o starter nao entrega pronto.
-type Cliente struct {
+// The http.Client is deliberately raw: a zero `Timeout` means waiting forever. A partner degrading to
+// 6s holds the request goroutine for that entire time, and nothing here stops the next call from
+// doing the same. Adding a timeout is the first thing the student will want to do — and it is exactly
+// what the starter does not deliver ready-made.
+type Client struct {
 	http *http.Client
 }
 
-func NovoCliente() *Cliente {
-	return &Cliente{http: &http.Client{}}
+func NewClient() *Client {
+	return &Client{http: &http.Client{}}
 }
 
-// limiteResposta corta respostas absurdas de uma parceira mal comportada.
-const limiteResposta = 1 << 20 // 1 MiB
+// responseLimit cuts off absurd responses from a badly behaved partner.
+const responseLimit = 1 << 20 // 1 MiB
 
-// Cotar pede uma cotacao a uma parceira. O pedido vai serializado pelo proprio cliente, e nao
-// repassado byte a byte do cliente original: o corpo canonico faz a mesma cotacao logica produzir
-// sempre a mesma requisicao — o que a parceira responde de forma estavel e o que, mais tarde, torna
-// uma chave de cache possivel.
-func (c *Cliente) Cotar(ctx context.Context, parceira platform.Parceira, pedido any) (Cotacao, error) {
-	corpo, err := json.Marshal(pedido)
+// Quote asks a partner for a quote. The request is serialized by the client itself instead of being
+// forwarded byte by byte from the original caller: a canonical body makes the same logical quote
+// always produce the same request — which is what the partner answers consistently, and what later
+// makes a cache key possible.
+func (c *Client) Quote(ctx context.Context, p platform.Partner, request any) (Quote, error) {
+	body, err := json.Marshal(request)
 	if err != nil {
-		return Cotacao{}, &Erro{Parceira: parceira.Nome, Motivo: fmt.Sprintf("pedido invalido: %v", err)}
+		return Quote{}, &Error{Partner: p.Name, Reason: fmt.Sprintf("invalid request: %v", err)}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, parceira.BaseURL+"/quotes", bytes.NewReader(corpo))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+"/quotes", bytes.NewReader(body))
 	if err != nil {
-		return Cotacao{}, &Erro{Parceira: parceira.Nome, Motivo: err.Error()}
+		return Quote{}, &Error{Partner: p.Name, Reason: err.Error()}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resposta, err := c.http.Do(req)
+	response, err := c.http.Do(req)
 	if err != nil {
-		return Cotacao{}, &Erro{Parceira: parceira.Nome, Motivo: err.Error()}
+		return Quote{}, &Error{Partner: p.Name, Reason: err.Error()}
 	}
-	defer func() { _ = resposta.Body.Close() }()
+	defer func() { _ = response.Body.Close() }()
 
-	if resposta.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resposta.Body, limiteResposta))
-		return Cotacao{}, &Erro{
-			Parceira: parceira.Nome,
-			Status:   resposta.StatusCode,
-			Motivo:   fmt.Sprintf("parceira respondeu %d", resposta.StatusCode),
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, responseLimit))
+		return Quote{}, &Error{
+			Partner: p.Name,
+			Status:  response.StatusCode,
+			Reason:  fmt.Sprintf("partner replied %d", response.StatusCode),
 		}
 	}
 
-	var cotacao Cotacao
-	if err := json.NewDecoder(io.LimitReader(resposta.Body, limiteResposta)).Decode(&cotacao); err != nil {
-		return Cotacao{}, &Erro{Parceira: parceira.Nome, Motivo: fmt.Sprintf("resposta ilegivel: %v", err)}
+	var quote Quote
+	if err := json.NewDecoder(io.LimitReader(response.Body, responseLimit)).Decode(&quote); err != nil {
+		return Quote{}, &Error{Partner: p.Name, Reason: fmt.Sprintf("unreadable response: %v", err)}
 	}
 
-	// A parceira pode omitir o proprio nome; quem manda e a configuracao.
-	cotacao.Parceira = parceira.Nome
-	return cotacao, nil
+	// The partner may omit its own name; the configuration is what rules.
+	quote.Partner = p.Name
+	return quote, nil
 }
 
-// Erro identifica qual parceira falhou e por que. Sem isso a API so saberia dizer "deu erro" — e o
-// aluno precisa saber de quem foi a culpa para decidir onde o breaker entra.
-type Erro struct {
-	Parceira string
-	Status   int
-	Motivo   string
+// Error identifies which partner failed and why. Without it the API could only say "something went
+// wrong" — and the student needs to know whose fault it was to decide where the breaker goes.
+type Error struct {
+	Partner string
+	Status  int
+	Reason  string
 }
 
-func (e *Erro) Error() string {
-	return fmt.Sprintf("parceira %s: %s", e.Parceira, e.Motivo)
+func (e *Error) Error() string {
+	return fmt.Sprintf("partner %s: %s", e.Partner, e.Reason)
 }

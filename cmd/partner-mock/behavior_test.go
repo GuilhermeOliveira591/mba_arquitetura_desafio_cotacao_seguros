@@ -5,231 +5,233 @@ import (
 	"time"
 )
 
-// perfilFlaky reproduz o `partner-flaky` do docker-compose.yml. Os testes deste arquivo sao a defesa
-// contra o risco registrado na spec ("mocks instaveis serem instaveis demais — ou de menos"): se
-// alguem mexer nos defaults e quebrar a reprodutibilidade ou as rajadas de falha, quebra aqui.
-func perfilFlaky() Config {
+// flakyProfile reproduces the `partner-flaky` from docker-compose.yml. The tests in this file are
+// the defense against the risk recorded in the spec ("unstable mocks being too unstable — or not
+// unstable enough"): if someone touches the defaults and breaks reproducibility or the failure
+// bursts, it breaks here.
+func flakyProfile() Config {
 	return Config{
-		Nome:            "partner-flaky",
-		Porta:           "8080",
-		Semente:         20260729,
-		Latencia:        150 * time.Millisecond,
-		Jitter:          50 * time.Millisecond,
-		TaxaFalha:       0.4,
-		StatusFalha:     503,
-		ValidadeCotacao: 300 * time.Second,
+		Name:          "partner-flaky",
+		Port:          "8080",
+		Seed:          20260729,
+		Latency:       150 * time.Millisecond,
+		Jitter:        50 * time.Millisecond,
+		FailureRate:   0.4,
+		FailureStatus: 503,
+		QuoteTTL:      300 * time.Second,
 	}
 }
 
-func sequenciaDeFalhas(cfg Config, n int) []bool {
-	c := NovoComportamento(cfg)
-	falhas := make([]bool, n)
-	for i := range falhas {
-		d := c.Admitir()
-		c.Concluir()
-		falhas[i] = d.Falha
+func failureSequence(cfg Config, n int) []bool {
+	b := NewBehavior(cfg)
+	failures := make([]bool, n)
+	for i := range failures {
+		d := b.Admit()
+		b.Complete()
+		failures[i] = d.Fail
 	}
-	return falhas
+	return failures
 }
 
-func TestFalhasSaoIdenticasEntreExecucoes(t *testing.T) {
-	primeira := sequenciaDeFalhas(perfilFlaky(), 500)
-	segunda := sequenciaDeFalhas(perfilFlaky(), 500)
+func TestFailuresAreIdenticalAcrossRuns(t *testing.T) {
+	first := failureSequence(flakyProfile(), 500)
+	second := failureSequence(flakyProfile(), 500)
 
-	for i := range primeira {
-		if primeira[i] != segunda[i] {
-			t.Fatalf("requisicao %d divergiu entre execucoes: %v e %v", i+1, primeira[i], segunda[i])
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("request %d diverged between runs: %v and %v", i+1, first[i], second[i])
 		}
 	}
 }
 
-func TestSementeDiferenteMudaASequencia(t *testing.T) {
-	cfg := perfilFlaky()
-	padrao := sequenciaDeFalhas(cfg, 200)
-	cfg.Semente = 1
-	outra := sequenciaDeFalhas(cfg, 200)
+func TestDifferentSeedChangesTheSequence(t *testing.T) {
+	cfg := flakyProfile()
+	standard := failureSequence(cfg, 200)
+	cfg.Seed = 1
+	other := failureSequence(cfg, 200)
 
-	for i := range padrao {
-		if padrao[i] != outra[i] {
+	for i := range standard {
+		if standard[i] != other[i] {
 			return
 		}
 	}
-	t.Fatal("sementes diferentes produziram a mesma sequencia de falhas")
+	t.Fatal("different seeds produced the same failure sequence")
 }
 
-func TestTaxaDeFalhaObservadaFicaPertoDaConfigurada(t *testing.T) {
-	const amostras = 20000
-	falhas := 0
-	for _, f := range sequenciaDeFalhas(perfilFlaky(), amostras) {
+func TestObservedFailureRateStaysCloseToTheConfiguredOne(t *testing.T) {
+	const samples = 20000
+	failures := 0
+	for _, f := range failureSequence(flakyProfile(), samples) {
 		if f {
-			falhas++
+			failures++
 		}
 	}
 
-	observada := float64(falhas) / amostras
-	if diferenca := observada - perfilFlaky().TaxaFalha; diferenca > 0.02 || diferenca < -0.02 {
-		t.Fatalf("taxa de falha observada %.4f, esperada %.2f (tolerancia 0.02)", observada, perfilFlaky().TaxaFalha)
+	observed := float64(failures) / samples
+	if difference := observed - flakyProfile().FailureRate; difference > 0.02 || difference < -0.02 {
+		t.Fatalf("observed failure rate %.4f, expected %.2f (tolerance 0.02)", observed, flakyProfile().FailureRate)
 	}
 }
 
-// TestPerfilFlakyProduzRajadas garante que o circuit breaker do aluno tem como abrir. Um mock que
-// alternasse sucesso e falha de forma regular nunca dispararia um breaker que conta falhas
-// consecutivas — e o exercicio inteiro do desafio morreria no default.
-func TestPerfilFlakyProduzRajadas(t *testing.T) {
-	const janela = 200
-	const rajadaMinima = 4
+// TestFlakyProfileProducesBursts makes sure the student's circuit breaker has a way to open. A mock
+// that alternated success and failure in a regular fashion would never trip a breaker that counts
+// consecutive failures — and the whole exercise of the challenge would die at the default.
+func TestFlakyProfileProducesBursts(t *testing.T) {
+	const window = 200
+	const minimumBurst = 4
 
-	maior, corrente := 0, 0
-	for _, falhou := range sequenciaDeFalhas(perfilFlaky(), janela) {
-		if !falhou {
-			corrente = 0
+	longest, current := 0, 0
+	for _, failed := range failureSequence(flakyProfile(), window) {
+		if !failed {
+			current = 0
 			continue
 		}
-		corrente++
-		if corrente > maior {
-			maior = corrente
+		current++
+		if current > longest {
+			longest = current
 		}
 	}
 
-	if maior < rajadaMinima {
-		t.Fatalf("maior rajada de falhas nas primeiras %d requisicoes foi %d, esperado ao menos %d", janela, maior, rajadaMinima)
+	if longest < minimumBurst {
+		t.Fatalf("longest failure burst in the first %d requests was %d, expected at least %d", window, longest, minimumBurst)
 	}
 }
 
-func TestTaxaZeroNuncaFalhaETaxaUmSempreFalha(t *testing.T) {
-	cfg := perfilFlaky()
-	cfg.TaxaFalha = 0
-	for i, falhou := range sequenciaDeFalhas(cfg, 100) {
-		if falhou {
-			t.Fatalf("taxa 0 falhou na requisicao %d", i+1)
+func TestRateZeroNeverFailsAndRateOneAlwaysFails(t *testing.T) {
+	cfg := flakyProfile()
+	cfg.FailureRate = 0
+	for i, failed := range failureSequence(cfg, 100) {
+		if failed {
+			t.Fatalf("rate 0 failed on request %d", i+1)
 		}
 	}
 
-	cfg.TaxaFalha = 1
-	for i, falhou := range sequenciaDeFalhas(cfg, 100) {
-		if !falhou {
-			t.Fatalf("taxa 1 teve sucesso na requisicao %d", i+1)
+	cfg.FailureRate = 1
+	for i, failed := range failureSequence(cfg, 100) {
+		if !failed {
+			t.Fatalf("rate 1 succeeded on request %d", i+1)
 		}
 	}
 }
 
-func TestJitterFicaDentroDaFaixa(t *testing.T) {
-	cfg := perfilFlaky()
-	c := NovoComportamento(cfg)
+func TestJitterStaysWithinTheRange(t *testing.T) {
+	cfg := flakyProfile()
+	b := NewBehavior(cfg)
 
-	viuVariacao := false
+	sawVariation := false
 	for i := 0; i < 500; i++ {
-		d := c.Admitir()
-		c.Concluir()
-		if d.Latencia < cfg.Latencia || d.Latencia >= cfg.Latencia+cfg.Jitter {
-			t.Fatalf("latencia %s fora da faixa [%s, %s)", d.Latencia, cfg.Latencia, cfg.Latencia+cfg.Jitter)
+		d := b.Admit()
+		b.Complete()
+		if d.Latency < cfg.Latency || d.Latency >= cfg.Latency+cfg.Jitter {
+			t.Fatalf("latency %s outside the range [%s, %s)", d.Latency, cfg.Latency, cfg.Latency+cfg.Jitter)
 		}
-		if d.Latencia != cfg.Latencia {
-			viuVariacao = true
+		if d.Latency != cfg.Latency {
+			sawVariation = true
 		}
 	}
-	if !viuVariacao {
-		t.Fatal("jitter configurado mas nenhuma latencia variou")
+	if !sawVariation {
+		t.Fatal("jitter configured but no latency varied")
 	}
 }
 
-func TestDegradacaoSoComecaAcimaDoLimiar(t *testing.T) {
+func TestDegradationOnlyStartsAboveTheThreshold(t *testing.T) {
 	cfg := Config{
-		Nome:            "partner-degrading",
-		Semente:         1,
-		Latencia:        120 * time.Millisecond,
-		DegradarApos:    5,
-		DegradarPasso:   300 * time.Millisecond,
-		DegradarTeto:    6 * time.Second,
-		ValidadeCotacao: 300 * time.Second,
+		Name:         "partner-degrading",
+		Seed:         1,
+		Latency:      120 * time.Millisecond,
+		DegradeAfter: 5,
+		DegradeStep:  300 * time.Millisecond,
+		DegradeCap:   6 * time.Second,
+		QuoteTTL:     300 * time.Second,
 	}
-	c := NovoComportamento(cfg)
+	b := NewBehavior(cfg)
 
-	casos := []struct {
-		emVoo    int64
-		esperado time.Duration
+	cases := []struct {
+		inFlight int64
+		want     time.Duration
 	}{
 		{1, 0},
 		{5, 0},
 		{6, 300 * time.Millisecond},
 		{10, 1500 * time.Millisecond},
-		{25, 6 * time.Second},  // teto
-		{100, 6 * time.Second}, // teto se mantem
+		{25, 6 * time.Second},  // cap
+		{100, 6 * time.Second}, // the cap holds
 	}
 
-	for _, caso := range casos {
-		if obtido := c.degradacao(caso.emVoo); obtido != caso.esperado {
-			t.Errorf("com %d em voo: degradacao %s, esperada %s", caso.emVoo, obtido, caso.esperado)
+	for _, tc := range cases {
+		if got := b.degradation(tc.inFlight); got != tc.want {
+			t.Errorf("with %d in flight: degradation %s, expected %s", tc.inFlight, got, tc.want)
 		}
 	}
 }
 
-func TestDegradacaoDesligadaQuandoLimiarEZero(t *testing.T) {
-	c := NovoComportamento(Config{Latencia: 100 * time.Millisecond, DegradarPasso: time.Second})
-	if d := c.degradacao(1000); d != 0 {
-		t.Fatalf("degradacao %s com PARTNER_DEGRADE_AFTER=0, esperada 0", d)
+func TestDegradationIsOffWhenTheThresholdIsZero(t *testing.T) {
+	b := NewBehavior(Config{Latency: 100 * time.Millisecond, DegradeStep: time.Second})
+	if d := b.degradation(1000); d != 0 {
+		t.Fatalf("degradation %s with PARTNER_DEGRADE_AFTER=0, expected 0", d)
 	}
 }
 
-func TestAdmitirContaRequisicoesEmVoo(t *testing.T) {
-	c := NovoComportamento(perfilFlaky())
+func TestAdmitCountsInFlightRequests(t *testing.T) {
+	b := NewBehavior(flakyProfile())
 
-	primeira := c.Admitir()
-	segunda := c.Admitir()
-	if primeira.EmVoo != 1 || segunda.EmVoo != 2 {
-		t.Fatalf("em voo na chegada: %d e %d, esperados 1 e 2", primeira.EmVoo, segunda.EmVoo)
+	first := b.Admit()
+	second := b.Admit()
+	if first.InFlight != 1 || second.InFlight != 2 {
+		t.Fatalf("in flight on arrival: %d and %d, expected 1 and 2", first.InFlight, second.InFlight)
 	}
-	if primeira.Sequencia != 1 || segunda.Sequencia != 2 {
-		t.Fatalf("sequencia: %d e %d, esperadas 1 e 2", primeira.Sequencia, segunda.Sequencia)
+	if first.Sequence != 1 || second.Sequence != 2 {
+		t.Fatalf("sequence: %d and %d, expected 1 and 2", first.Sequence, second.Sequence)
 	}
 
-	c.Concluir()
-	c.Concluir()
-	if restante := c.EmVoo(); restante != 0 {
-		t.Fatalf("%d requisicoes em voo depois de concluir todas", restante)
+	b.Complete()
+	b.Complete()
+	if remaining := b.InFlight(); remaining != 0 {
+		t.Fatalf("%d requests in flight after completing all of them", remaining)
 	}
 }
 
-func TestCotacaoEEstavelPorPedido(t *testing.T) {
-	c := NovoComportamento(perfilFlaky())
-	pedido := []byte(`{"tenant_id":"corretora-a","driver_age":35}`)
+func TestQuoteIsStablePerRequest(t *testing.T) {
+	b := NewBehavior(flakyProfile())
+	request := []byte(`{"tenant_id":"broker-a","driver_age":35}`)
 
-	primeira := c.Cotar(pedido)
-	segunda := c.Cotar(pedido)
-	if primeira != segunda {
-		t.Fatalf("mesmo pedido gerou cotacoes diferentes: %+v e %+v", primeira, segunda)
+	first := b.Quote(request)
+	second := b.Quote(request)
+	if first != second {
+		t.Fatalf("the same request produced different quotes: %+v and %+v", first, second)
 	}
-	if outra := c.Cotar([]byte(`{"tenant_id":"corretora-b","driver_age":35}`)); outra == primeira {
-		t.Fatal("pedidos diferentes geraram a mesma cotacao")
+	if other := b.Quote([]byte(`{"tenant_id":"broker-b","driver_age":35}`)); other == first {
+		t.Fatal("different requests produced the same quote")
 	}
 
-	if primeira.Parceira != "partner-flaky" {
-		t.Errorf("parceira %q, esperada partner-flaky", primeira.Parceira)
+	if first.Partner != "partner-flaky" {
+		t.Errorf("partner %q, expected partner-flaky", first.Partner)
 	}
-	if primeira.Moeda != "BRL" {
-		t.Errorf("moeda %q, esperada BRL", primeira.Moeda)
+	if first.Currency != "BRL" {
+		t.Errorf("currency %q, expected BRL", first.Currency)
 	}
-	if primeira.PremioCentavos < 50000 || primeira.PremioCentavos > 200000 {
-		t.Errorf("premio %d centavos fora da faixa esperada", primeira.PremioCentavos)
+	if first.PremiumCents < 50000 || first.PremiumCents > 200000 {
+		t.Errorf("premium %d cents outside the expected range", first.PremiumCents)
 	}
-	if primeira.ValidadeSegundos != 300 {
-		t.Errorf("validade %d segundos, esperada 300", primeira.ValidadeSegundos)
+	if first.ValidForSeconds != 300 {
+		t.Errorf("validity %d seconds, expected 300", first.ValidForSeconds)
 	}
 }
 
-// TestParceirasDiferentesCotamDiferente garante que a agregacao da quotation-api tem o que comparar:
-// tres parceiras devolvendo o mesmo premio para o mesmo pedido esvaziariam o cenario.
-func TestParceirasDiferentesCotamDiferente(t *testing.T) {
-	pedido := []byte(`{"tenant_id":"corretora-a"}`)
-	premios := map[int64]string{}
+// TestDifferentPartnersQuoteDifferently makes sure the quotation-api's aggregation has something to
+// compare: three partners returning the same premium for the same request would empty the scenario
+// out.
+func TestDifferentPartnersQuoteDifferently(t *testing.T) {
+	request := []byte(`{"tenant_id":"broker-a"}`)
+	premiums := map[int64]string{}
 
-	for _, nome := range []string{"partner-slow", "partner-flaky", "partner-degrading"} {
-		cfg := perfilFlaky()
-		cfg.Nome = nome
-		cotacao := NovoComportamento(cfg).Cotar(pedido)
-		if anterior, repetido := premios[cotacao.PremioCentavos]; repetido {
-			t.Fatalf("%s e %s cotaram o mesmo premio %d", anterior, nome, cotacao.PremioCentavos)
+	for _, name := range []string{"partner-slow", "partner-flaky", "partner-degrading"} {
+		cfg := flakyProfile()
+		cfg.Name = name
+		quote := NewBehavior(cfg).Quote(request)
+		if previous, repeated := premiums[quote.PremiumCents]; repeated {
+			t.Fatalf("%s and %s quoted the same premium %d", previous, name, quote.PremiumCents)
 		}
-		premios[cotacao.PremioCentavos] = nome
+		premiums[quote.PremiumCents] = name
 	}
 }

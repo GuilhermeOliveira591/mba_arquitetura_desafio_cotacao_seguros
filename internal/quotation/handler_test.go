@@ -10,114 +10,115 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/platform"
 )
 
-const corpoValido = `{
+const validBody = `{
   "driver": {"document": "12345678901", "birth_year": 1988},
   "vehicle": {"plate": "abc1d23", "model": "Gol 1.0", "year": 2020, "value_cents": 8500000},
   "coverage": "comprehensive"
 }`
 
-func apiDeTeste(cotador Cotador) http.Handler {
-	return NovaAPI(NovoServico(tresParceiras, cotador), []string{"corretora-a", "corretora-b"}).Rotas()
+func testAPI(quoter Quoter) http.Handler {
+	return NewAPI(NewService(threePartners, quoter), []string{"corretora-a", "corretora-b"}).Routes()
 }
 
-func postQuotes(h http.Handler, tenant, corpo string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/quotes", strings.NewReader(corpo))
+func postQuotes(h http.Handler, tenant, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/quotes", strings.NewReader(body))
 	if tenant != "" {
-		req.Header.Set(CabecalhoTenant, tenant)
+		req.Header.Set(TenantHeader, tenant)
 	}
-	resposta := httptest.NewRecorder()
-	h.ServeHTTP(resposta, req)
-	return resposta
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, req)
+	return response
 }
 
-func TestQuotesRetornaCotacoesAgregadas(t *testing.T) {
-	resposta := postQuotes(apiDeTeste(&cotadorFalso{premios: premiosPadrao()}), "corretora-a", corpoValido)
-	if resposta.Code != http.StatusOK {
-		t.Fatalf("status %d, esperado 200: %s", resposta.Code, resposta.Body)
+func TestQuotesReturnsAggregatedQuotes(t *testing.T) {
+	response := postQuotes(testAPI(&fakeQuoter{premiums: defaultPremiums()}), "corretora-a", validBody)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d, expected 200: %s", response.Code, response.Body)
 	}
 
-	var corpo Resposta
-	if err := json.Unmarshal(resposta.Body.Bytes(), &corpo); err != nil {
-		t.Fatalf("resposta ilegivel: %v", err)
+	var body Response
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unreadable response: %v", err)
 	}
-	if len(corpo.Cotacoes) != 3 {
-		t.Fatalf("%d cotacoes, esperadas 3", len(corpo.Cotacoes))
+	if len(body.Quotes) != 3 {
+		t.Fatalf("%d quotes, expected 3", len(body.Quotes))
 	}
-	if corpo.TenantID != "corretora-a" {
-		t.Errorf("tenant_id %q, esperado corretora-a", corpo.TenantID)
-	}
-}
-
-// TestQuotesRejeitaRequisicaoSemTenant e o criterio de aceite da issue: sem corretora, sem cotacao.
-func TestQuotesRejeitaRequisicaoSemTenant(t *testing.T) {
-	cotador := &cotadorFalso{premios: premiosPadrao()}
-	resposta := postQuotes(apiDeTeste(cotador), "", corpoValido)
-
-	if resposta.Code != http.StatusBadRequest {
-		t.Fatalf("status %d, esperado 400", resposta.Code)
-	}
-	if len(cotador.chamadas) != 0 {
-		t.Fatalf("as parceiras foram consultadas (%v) mesmo sem tenant", cotador.chamadas)
+	if body.TenantID != "corretora-a" {
+		t.Errorf("tenant_id %q, expected corretora-a", body.TenantID)
 	}
 }
 
-func TestQuotesRejeitaCorretoraDesconhecida(t *testing.T) {
-	cotador := &cotadorFalso{premios: premiosPadrao()}
-	resposta := postQuotes(apiDeTeste(cotador), "corretora-pirata", corpoValido)
+// TestQuotesRejectsRequestWithoutTenant is the acceptance criterion of the issue: no broker, no
+// quote.
+func TestQuotesRejectsRequestWithoutTenant(t *testing.T) {
+	quoter := &fakeQuoter{premiums: defaultPremiums()}
+	response := postQuotes(testAPI(quoter), "", validBody)
 
-	if resposta.Code != http.StatusForbidden {
-		t.Fatalf("status %d, esperado 403", resposta.Code)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, expected 400", response.Code)
 	}
-	if len(cotador.chamadas) != 0 {
-		t.Fatalf("as parceiras foram consultadas (%v) para uma corretora nao habilitada", cotador.chamadas)
+	if len(quoter.calls) != 0 {
+		t.Fatalf("the partners were called (%v) even without a tenant", quoter.calls)
 	}
 }
 
-func TestQuotesRejeitaCorpoInvalido(t *testing.T) {
-	casos := map[string]string{
-		"json quebrado":      `{"driver":`,
-		"sem documento":      `{"driver":{"birth_year":1988},"vehicle":{"plate":"ABC1D23","year":2020,"value_cents":100}}`,
-		"sem placa":          `{"driver":{"document":"1","birth_year":1988},"vehicle":{"year":2020,"value_cents":100}}`,
-		"valor zerado":       `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":0}}`,
-		"cobertura invalida": `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":1},"coverage":"vip"}`,
-		"campo desconhecido": `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":1},"desconto":true}`,
+func TestQuotesRejectsUnknownBroker(t *testing.T) {
+	quoter := &fakeQuoter{premiums: defaultPremiums()}
+	response := postQuotes(testAPI(quoter), "corretora-pirata", validBody)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status %d, expected 403", response.Code)
+	}
+	if len(quoter.calls) != 0 {
+		t.Fatalf("the partners were called (%v) for a broker that is not enabled", quoter.calls)
+	}
+}
+
+func TestQuotesRejectsInvalidBody(t *testing.T) {
+	cases := map[string]string{
+		"broken json":      `{"driver":`,
+		"missing document": `{"driver":{"birth_year":1988},"vehicle":{"plate":"ABC1D23","year":2020,"value_cents":100}}`,
+		"missing plate":    `{"driver":{"document":"1","birth_year":1988},"vehicle":{"year":2020,"value_cents":100}}`,
+		"zero value":       `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":0}}`,
+		"invalid coverage": `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":1},"coverage":"vip"}`,
+		"unknown field":    `{"driver":{"document":"1","birth_year":1988},"vehicle":{"plate":"A","year":2020,"value_cents":1},"discount":true}`,
 	}
 
-	for nome, corpo := range casos {
-		t.Run(nome, func(t *testing.T) {
-			resposta := postQuotes(apiDeTeste(&cotadorFalso{premios: premiosPadrao()}), "corretora-a", corpo)
-			if resposta.Code != http.StatusBadRequest {
-				t.Fatalf("status %d, esperado 400: %s", resposta.Code, resposta.Body)
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			response := postQuotes(testAPI(&fakeQuoter{premiums: defaultPremiums()}), "corretora-a", body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, expected 400: %s", response.Code, response.Body)
 			}
 		})
 	}
 }
 
-// TestQuotesResponde502ComANomeDaParceiraQueCaiu documenta o comportamento ingenuo: nao ha resposta
-// parcial, e a API diz de quem foi a culpa.
-func TestQuotesResponde502ComANomeDaParceiraQueCaiu(t *testing.T) {
-	cotador := &cotadorFalso{premios: premiosPadrao(), falhaEm: "partner-flaky"}
-	resposta := postQuotes(apiDeTeste(cotador), "corretora-a", corpoValido)
+// TestQuotesResponds502WithTheNameOfThePartnerThatWentDown documents the naive behavior: there is no
+// partial response, and the API says whose fault it was.
+func TestQuotesResponds502WithTheNameOfThePartnerThatWentDown(t *testing.T) {
+	quoter := &fakeQuoter{premiums: defaultPremiums(), failOn: "partner-flaky"}
+	response := postQuotes(testAPI(quoter), "corretora-a", validBody)
 
-	if resposta.Code != http.StatusBadGateway {
-		t.Fatalf("status %d, esperado 502", resposta.Code)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status %d, expected 502", response.Code)
 	}
 
-	var erro platform.Erro
-	if err := json.Unmarshal(resposta.Body.Bytes(), &erro); err != nil {
-		t.Fatalf("erro ilegivel: %v", err)
+	var body platform.ErrorBody
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unreadable error: %v", err)
 	}
-	if erro.Parceira != "partner-flaky" {
-		t.Errorf("parceira culpada %q, esperada partner-flaky", erro.Parceira)
+	if body.Partner != "partner-flaky" {
+		t.Errorf("partner blamed %q, expected partner-flaky", body.Partner)
 	}
 }
 
 func TestHealthz(t *testing.T) {
-	resposta := httptest.NewRecorder()
-	apiDeTeste(&cotadorFalso{premios: premiosPadrao()}).
-		ServeHTTP(resposta, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	response := httptest.NewRecorder()
+	testAPI(&fakeQuoter{premiums: defaultPremiums()}).
+		ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
-	if resposta.Code != http.StatusOK {
-		t.Fatalf("status %d, esperado 200", resposta.Code)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status %d, expected 200", response.Code)
 	}
 }

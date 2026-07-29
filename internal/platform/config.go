@@ -1,5 +1,5 @@
-// Package platform reune a infraestrutura compartilhada da quotation-api: configuracao, servidor
-// HTTP e escrita de JSON. Nada de regra de negocio mora aqui.
+// Package platform holds the shared infrastructure of the quotation-api: configuration, HTTP server
+// and JSON writing. No business rule lives here.
 package platform
 
 import (
@@ -9,96 +9,96 @@ import (
 	"strings"
 )
 
-// Config e a configuracao da quotation-api.
+// Config is the configuration of the quotation-api.
 type Config struct {
-	Porta     string     // PORT
-	Parceiras []Parceira // PARTNER_ENDPOINTS
-	Tenants   []string   // TENANTS
+	Port     string    // PORT
+	Partners []Partner // PARTNER_ENDPOINTS
+	Tenants  []string  // TENANTS
 }
 
-// Parceira e uma seguradora parceira alcancavel por HTTP.
-type Parceira struct {
-	Nome    string
+// Partner is a partner insurer reachable over HTTP.
+type Partner struct {
+	Name    string
 	BaseURL string
 }
 
-// enderecosPadrao aponta para as portas que o docker-compose.yml publica no host, para `make run`
-// funcionar contra o ambiente subido com `make up` sem precisar exportar nada.
-const enderecosPadrao = "partner-slow=http://localhost:9001," +
+// defaultEndpoints points at the ports the docker-compose.yml publishes on the host, so that
+// `make run` works against the environment brought up with `make up` without exporting anything.
+const defaultEndpoints = "partner-slow=http://localhost:9001," +
 	"partner-flaky=http://localhost:9002," +
 	"partner-degrading=http://localhost:9003"
 
-// tenantsPadrao sao as corretoras que o starter ja conhece. Multi-tenant aqui nao e enfeite: e o
-// que torna a isolacao do cache uma decisao de verdade quando o aluno chegar no PoC.
-const tenantsPadrao = "corretora-a,corretora-b"
+// defaultTenants are the brokers the starter already knows about. Multi-tenancy here is not
+// decoration: it is what turns cache isolation into a real decision once the student reaches the PoC.
+const defaultTenants = "corretora-a,corretora-b"
 
-func CarregarConfig(env func(string) string) (Config, error) {
-	cfg := Config{Porta: texto(env, "PORT", "8080")}
+func LoadConfig(env func(string) string) (Config, error) {
+	cfg := Config{Port: text(env, "PORT", "8080")}
 
 	var err error
-	if cfg.Parceiras, err = parsearParceiras(texto(env, "PARTNER_ENDPOINTS", enderecosPadrao)); err != nil {
+	if cfg.Partners, err = parsePartners(text(env, "PARTNER_ENDPOINTS", defaultEndpoints)); err != nil {
 		return Config{}, err
 	}
-	if cfg.Tenants, err = parsearTenants(texto(env, "TENANTS", tenantsPadrao)); err != nil {
+	if cfg.Tenants, err = parseTenants(text(env, "TENANTS", defaultTenants)); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
 }
 
-// parsearParceiras le a lista `nome=url,nome=url`. Ter as tres parceiras em uma variavel so mantem a
-// topologia do ambiente visivel em um lugar unico do docker-compose.yml.
-func parsearParceiras(bruto string) ([]Parceira, error) {
-	var parceiras []Parceira
-	vistas := map[string]bool{}
+// parsePartners reads the `name=url,name=url` list. Keeping the three partners in a single variable
+// keeps the topology of the environment visible in one single place of the docker-compose.yml.
+func parsePartners(raw string) ([]Partner, error) {
+	var partners []Partner
+	seen := map[string]bool{}
 
-	for _, item := range strings.Split(bruto, ",") {
+	for _, item := range strings.Split(raw, ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
 
-		nome, endereco, achou := strings.Cut(item, "=")
-		nome, endereco = strings.TrimSpace(nome), strings.TrimSpace(endereco)
-		if !achou || nome == "" || endereco == "" {
-			return nil, fmt.Errorf("PARTNER_ENDPOINTS: %q nao esta no formato nome=url", item)
+		name, endpoint, found := strings.Cut(item, "=")
+		name, endpoint = strings.TrimSpace(name), strings.TrimSpace(endpoint)
+		if !found || name == "" || endpoint == "" {
+			return nil, fmt.Errorf("PARTNER_ENDPOINTS: %q is not in the name=url format", item)
 		}
 
-		if u, err := url.Parse(endereco); err != nil || u.Scheme == "" || u.Host == "" {
-			return nil, fmt.Errorf("PARTNER_ENDPOINTS: %q nao e uma URL absoluta", endereco)
+		if u, err := url.Parse(endpoint); err != nil || u.Scheme == "" || u.Host == "" {
+			return nil, fmt.Errorf("PARTNER_ENDPOINTS: %q is not an absolute URL", endpoint)
 		}
-		if vistas[nome] {
-			return nil, fmt.Errorf("PARTNER_ENDPOINTS: parceira %q repetida", nome)
+		if seen[name] {
+			return nil, fmt.Errorf("PARTNER_ENDPOINTS: partner %q is repeated", name)
 		}
 
-		vistas[nome] = true
-		parceiras = append(parceiras, Parceira{Nome: nome, BaseURL: strings.TrimRight(endereco, "/")})
+		seen[name] = true
+		partners = append(partners, Partner{Name: name, BaseURL: strings.TrimRight(endpoint, "/")})
 	}
 
-	if len(parceiras) == 0 {
-		return nil, fmt.Errorf("PARTNER_ENDPOINTS: ao menos uma parceira e obrigatoria")
+	if len(partners) == 0 {
+		return nil, fmt.Errorf("PARTNER_ENDPOINTS: at least one partner is required")
 	}
-	return parceiras, nil
+	return partners, nil
 }
 
-func parsearTenants(bruto string) ([]string, error) {
+func parseTenants(raw string) ([]string, error) {
 	var tenants []string
-	for _, t := range strings.Split(bruto, ",") {
+	for _, t := range strings.Split(raw, ",") {
 		if t = strings.TrimSpace(t); t != "" {
 			tenants = append(tenants, t)
 		}
 	}
 	if len(tenants) == 0 {
-		return nil, fmt.Errorf("TENANTS: ao menos uma corretora e obrigatoria")
+		return nil, fmt.Errorf("TENANTS: at least one broker is required")
 	}
 	return tenants, nil
 }
 
-// Ambiente e a leitura padrao de variaveis de ambiente.
-func Ambiente() func(string) string { return os.Getenv }
+// Environment is the standard environment variable lookup.
+func Environment() func(string) string { return os.Getenv }
 
-func texto(env func(string) string, chave, padrao string) string {
-	if v := env(chave); v != "" {
+func text(env func(string) string, key, fallback string) string {
+	if v := env(key); v != "" {
 		return v
 	}
-	return padrao
+	return fallback
 }
