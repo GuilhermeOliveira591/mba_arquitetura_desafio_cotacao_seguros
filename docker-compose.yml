@@ -1,8 +1,8 @@
 # Ambiente local do starter. Um comando (`docker compose up`) precisa deixar tudo de pe,
 # sem conta em cloud provider e sem custo.
 #
-# Hoje sobe o Redis e as tres seguradoras parceiras. A quotation-api e a stack de observabilidade
-# (OTel Collector, Jaeger, Prometheus) entram neste mesmo arquivo conforme forem construidas.
+# Hoje sobe o Redis, as tres seguradoras parceiras e a quotation-api. A stack de observabilidade
+# (OTel Collector, Jaeger, Prometheus) entra neste mesmo arquivo conforme for construida.
 
 # As tres parceiras sao o MESMO binario (cmd/partner-mock). O que muda de uma para a outra e so o
 # bloco de `environment` abaixo — e onde mora, inteiro e legivel, o mau comportamento do desafio.
@@ -20,6 +20,35 @@ x-parceira: &parceira
     retries: 5
 
 services:
+  # A API que o aluno instrumenta. Ela consulta as tres parceiras EM SERIE, sem timeout, sem circuit
+  # breaker, sem cache e sem fallback — o Redis abaixo sobe justamente para o cache que ainda nao
+  # existe. O vazio e o enunciado.
+  quotation-api:
+    build:
+      context: .
+      args:
+        CMD: quotation-api
+    container_name: cotacao-quotation-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      PARTNER_ENDPOINTS: "partner-slow=http://partner-slow:8080,partner-flaky=http://partner-flaky:8080,partner-degrading=http://partner-degrading:8080"
+      TENANTS: "corretora-a,corretora-b"
+    depends_on:
+      partner-slow:
+        condition: service_healthy
+      partner-flaky:
+        condition: service_healthy
+      partner-degrading:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: cotacao-redis
