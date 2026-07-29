@@ -5,6 +5,11 @@ bin/
 *.out
 vendor/
 
+# Binarios que `go build ./...` larga na raiz (o Makefile compila em bin/)
+/quotation-api
+/partner-mock
+/loadgen
+
 # Ambiente
 .env
 .env.local

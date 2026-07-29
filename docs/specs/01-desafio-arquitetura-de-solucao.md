@@ -108,7 +108,29 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 
 - **Arquitetura (do starter):** a definir na implementação; deve ser simples e legível, já que o
   starter é material didático — o aluno precisa entender o código em minutos para poder modificá-lo.
-- **Estrutura de pastas:** a definir.
+- **Estrutura de pastas** (definida em 2026-07-29): layout Go padrão `cmd/` + `internal/`, raso de
+  propósito — o aluno tem que achar o ponto de extensão sem caçar arquivo.
+
+  ```
+  cmd/                     # um diretório por binário
+    quotation-api/         # API de cotação multi-tenant (o que o aluno instrumenta)
+    partner-mock/          # mock de seguradora parceira, parametrizável nos três perfis
+    loadgen/               # gerador de carga para reproduzir o cenário de falha
+  internal/                # código da aplicação, não importável de fora do módulo
+    quotation/             # regra de cotação e handlers HTTP
+    partner/               # cliente das seguradoras parceiras — onde o circuit breaker vai nascer
+    platform/              # infra compartilhada: config, servidor HTTP, log
+  deploy/                  # configuração das ferramentas de terceiros
+    otel/                  # OTel Collector
+    prometheus/            # Prometheus
+  docs/specs/              # specs do projeto (não faz parte do que o aluno forka)
+  docker-compose.yml       # ambiente completo: um comando sobe tudo
+  Makefile                 # comandos do dia a dia (`make help` lista todos)
+  ```
+
+  Os três perfis de mock (`partner-slow`, `partner-flaky`, `partner-degrading`) são **um binário
+  parametrizado**, não três programas: o comportamento ruim vira configuração no
+  `docker-compose.yml`, o que mantém o starter pequeno e a instabilidade legível em um lugar só.
 - **Convenções:** Conventional Commits (pipeline de skills já configurado no ambiente:
   `/kickoff → /create-issue → /create-branch → /conventional-commits`).
 - **UI & styling:** N/A — não há interface. A entrega é API + documentos + dashboards de

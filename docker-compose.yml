@@ -1,0 +1,21 @@
+# Ambiente local do starter. Um comando (`docker compose up`) precisa deixar tudo de pe,
+# sem conta em cloud provider e sem custo.
+#
+# Hoje sobe apenas o Redis. Os mocks das seguradoras parceiras, a quotation-api e a stack de
+# observabilidade (OTel Collector, Jaeger, Prometheus) entram neste mesmo arquivo conforme
+# forem construidos.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: cotacao-redis
+    # O cache do desafio e efemero de proposito: sem persistencia, o `docker compose up`
+    # comeca sempre do mesmo estado — pre-requisito de um cenario reproduzivel entre alunos.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
