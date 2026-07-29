@@ -53,15 +53,69 @@ func TestConfigReadsPartnersAndTenantsFromTheEnvironment(t *testing.T) {
 	}
 }
 
+// TestTelemetryIsOnByDefault pins the decision that the student does not have to switch
+// observability on: it is already running when the environment comes up.
+func TestTelemetryIsOnByDefault(t *testing.T) {
+	cfg, err := LoadConfig(env(nil))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	want := Telemetry{ServiceName: "quotation-api", Endpoint: "http://localhost:4317", Enabled: true}
+	if cfg.Telemetry != want {
+		t.Errorf("telemetry %+v, want %+v", cfg.Telemetry, want)
+	}
+}
+
+func TestTelemetryReadsTheStandardOTelVariables(t *testing.T) {
+	cfg, err := LoadConfig(env(map[string]string{
+		"OTEL_SERVICE_NAME":           "quotation-api-poc",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": " http://otel-collector:4317 ",
+	}))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	want := Telemetry{ServiceName: "quotation-api-poc", Endpoint: "http://otel-collector:4317", Enabled: true}
+	if cfg.Telemetry != want {
+		t.Errorf("telemetry %+v, want %+v", cfg.Telemetry, want)
+	}
+}
+
+func TestTelemetryCanBeTurnedOff(t *testing.T) {
+	cfg, err := LoadConfig(env(map[string]string{"OTEL_SDK_DISABLED": "TRUE"}))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Telemetry.Enabled {
+		t.Error("OTEL_SDK_DISABLED=TRUE did not turn the SDK off")
+	}
+}
+
+// TestTelemetryOffSkipsEndpointValidation keeps a broken endpoint from stopping an API that is not
+// going to export anything anyway.
+func TestTelemetryOffSkipsEndpointValidation(t *testing.T) {
+	if _, err := LoadConfig(env(map[string]string{
+		"OTEL_SDK_DISABLED":           "true",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "not-a-url",
+	})); err != nil {
+		t.Fatalf("LoadConfig with the SDK off: %v", err)
+	}
+}
+
 func TestInvalidConfigFails(t *testing.T) {
 	cases := map[string]map[string]string{
-		"partner without url":  {"PARTNER_ENDPOINTS": "partner-slow"},
-		"relative url":         {"PARTNER_ENDPOINTS": "partner-slow=/quotes"},
-		"url without host":     {"PARTNER_ENDPOINTS": "partner-slow=http://"},
-		"partner without name": {"PARTNER_ENDPOINTS": "=http://a:8080"},
-		"repeated partner":     {"PARTNER_ENDPOINTS": "a=http://a:8080,a=http://b:8080"},
-		"empty partner list":   {"PARTNER_ENDPOINTS": " , "},
-		"empty tenant list":    {"TENANTS": " , "},
+		"partner without url":                {"PARTNER_ENDPOINTS": "partner-slow"},
+		"relative url":                       {"PARTNER_ENDPOINTS": "partner-slow=/quotes"},
+		"url without host":                   {"PARTNER_ENDPOINTS": "partner-slow=http://"},
+		"partner without name":               {"PARTNER_ENDPOINTS": "=http://a:8080"},
+		"repeated partner":                   {"PARTNER_ENDPOINTS": "a=http://a:8080,a=http://b:8080"},
+		"empty partner list":                 {"PARTNER_ENDPOINTS": " , "},
+		"empty tenant list":                  {"TENANTS": " , "},
+		"collector without scheme":           {"OTEL_EXPORTER_OTLP_ENDPOINT": "otel-collector:4317"},
+		"collector without host":             {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://"},
+		"OTEL_SDK_DISABLED is not a boolean": {"OTEL_SDK_DISABLED": "maybe"},
 	}
 
 	for name, vars := range cases {

@@ -1,8 +1,11 @@
 # Ambiente local do starter. Um comando (`docker compose up`) precisa deixar tudo de pe,
 # sem conta em cloud provider e sem custo.
 #
-# Hoje sobe o Redis, as tres seguradoras parceiras e a quotation-api. A stack de observabilidade
-# (OTel Collector, Jaeger, Prometheus) entra neste mesmo arquivo conforme for construida.
+# Sobe a quotation-api, as tres seguradoras parceiras, o Redis (para o cache que ainda nao existe) e
+# a stack de observabilidade ja funcionando:
+#
+#   Jaeger      http://localhost:16686   traces
+#   Prometheus  http://localhost:9090    metricas
 
 # As tres parceiras sao o MESMO binario (cmd/partner-mock). O que muda de uma para a outra e so o
 # bloco de `environment` abaixo — e onde mora, inteiro e legivel, o mau comportamento do desafio.
@@ -36,6 +39,10 @@ services:
       PORT: "8080"
       PARTNER_ENDPOINTS: "partner-slow=http://partner-slow:8080,partner-flaky=http://partner-flaky:8080,partner-degrading=http://partner-degrading:8080"
       TENANTS: "corretora-a,corretora-b"
+      # O SDK do OpenTelemetry ja sobe ligado e manda tudo para o Collector — o aluno nao precisa
+      # escrever uma linha para ver o trace da requisicao no Jaeger. Para desligar: OTEL_SDK_DISABLED=true.
+      OTEL_SERVICE_NAME: quotation-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     depends_on:
       partner-slow:
         condition: service_healthy
@@ -43,11 +50,63 @@ services:
         condition: service_healthy
       partner-degrading:
         condition: service_healthy
+      # service_started, e nao service_healthy: o exportador conecta preguicosamente e reconecta
+      # sozinho. Amarrar a API a saude do Collector seria dar a observabilidade o poder de derrubar
+      # o que ela deveria so observar.
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # --- Observabilidade -------------------------------------------------------------------------
+  # A aplicacao fala com UM destino (o Collector). Quem decide onde o dado cai e o
+  # deploy/otel/collector.yaml — trocar Jaeger ou Prometheus nao encosta no codigo Go.
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: cotacao-otel-collector
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ./deploy/otel/collector.yaml:/etc/otel/collector.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC — publicado no host para o `make run` funcionar fora do compose
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # metricas da aplicacao, no formato que o Prometheus raspa
+      - "8888:8888" # metricas do proprio Collector
+    depends_on:
+      - jaeger
+    restart: unless-stopped
+
+  # Jaeger all-in-one: recebe OTLP direto do Collector e guarda os traces em memoria. Sem
+  # persistencia de proposito — `make down` zera o cenario, e o aluno compara antes e depois sem
+  # trace velho no meio.
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    container_name: cotacao-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: cotacao-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1h"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  # --- Dependencias da aplicacao ---------------------------------------------------------------
 
   redis:
     image: redis:7-alpine

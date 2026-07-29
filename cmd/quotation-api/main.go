@@ -32,6 +32,17 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
+	ctx, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopListening()
+
+	// The OpenTelemetry SDK is booted here, before anything else, so that everything the process
+	// does afterwards is already traced. The student does not write a single line to see the
+	// request in Jaeger — see internal/platform/telemetry.go.
+	stopTelemetry, err := platform.StartTelemetry(context.Background(), cfg.Telemetry)
+	if err != nil {
+		log.Fatalf("telemetry: %v", err)
+	}
+
 	api := quotation.NewAPI(
 		quotation.NewService(cfg.Partners, partner.NewClient()),
 		cfg.Tenants,
@@ -39,12 +50,9 @@ func main() {
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           api.Routes(),
+		Handler:           platform.InstrumentHandler(api.Routes(), cfg.Telemetry.ServiceName),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	ctx, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopListening()
 
 	go func() {
 		<-ctx.Done()
@@ -53,6 +61,11 @@ func main() {
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
 			log.Printf("quotation-api: forced shutdown: %v", err)
+		}
+		// Flushing after the server is down is what keeps the spans of the last requests — the
+		// interesting ones, when something is on fire — from dying with the process.
+		if err := stopTelemetry(shutdown); err != nil {
+			log.Printf("quotation-api: telemetry shutdown: %v", err)
 		}
 	}()
 

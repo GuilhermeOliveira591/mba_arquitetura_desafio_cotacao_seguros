@@ -34,12 +34,17 @@ type Quote struct {
 // 6s holds the request goroutine for that entire time, and nothing here stops the next call from
 // doing the same. Adding a timeout is the first thing the student will want to do — and it is exactly
 // what the starter does not deliver ready-made.
+//
+// The only thing wrapping the transport is the OpenTelemetry instrumentation, and it protects
+// nothing: it just makes each call to a partner a span inside the trace. Seeing the three calls
+// lined up one after the other in Jaeger is what turns "it is slow" into "it is slow BECAUSE it is
+// serial".
 type Client struct {
 	http *http.Client
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{}}
+	return &Client{http: &http.Client{Transport: platform.InstrumentTransport(http.DefaultTransport)}}
 }
 
 // responseLimit cuts off absurd responses from a badly behaved partner.
