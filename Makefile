@@ -7,8 +7,8 @@ BINDIR  ?= bin
 ## --- Ambiente (Docker Compose) ---
 
 .PHONY: up
-up: ## Sobe o ambiente completo em background
-	$(COMPOSE) up -d
+up: ## Sobe o ambiente completo em background (recompila as imagens do starter)
+	$(COMPOSE) up -d --build
 
 .PHONY: down
 down: ## Derruba o ambiente e remove os volumes

@@ -1,0 +1,10 @@
+.git
+.github
+.husky
+.claude
+bin
+docs
+Makefile
+docker-compose.yml
+Dockerfile
+README.md

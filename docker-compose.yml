@@ -1,9 +1,23 @@
 # Ambiente local do starter. Um comando (`docker compose up`) precisa deixar tudo de pe,
 # sem conta em cloud provider e sem custo.
 #
-# Hoje sobe apenas o Redis. Os mocks das seguradoras parceiras, a quotation-api e a stack de
-# observabilidade (OTel Collector, Jaeger, Prometheus) entram neste mesmo arquivo conforme
-# forem construidos.
+# Hoje sobe o Redis e as tres seguradoras parceiras. A quotation-api e a stack de observabilidade
+# (OTel Collector, Jaeger, Prometheus) entram neste mesmo arquivo conforme forem construidas.
+
+# As tres parceiras sao o MESMO binario (cmd/partner-mock). O que muda de uma para a outra e so o
+# bloco de `environment` abaixo — e onde mora, inteiro e legivel, o mau comportamento do desafio.
+x-parceira: &parceira
+  build:
+    context: .
+    args:
+      CMD: partner-mock
+  restart: unless-stopped
+  healthcheck:
+    # /healthz nao sofre latencia nem falha do perfil: a parceira lenta tambem precisa subir de pe.
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
 
 services:
   redis:
@@ -19,3 +33,48 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # Lenta e constante: responde sempre, mas devagar demais para uma agregacao sincrona em serie.
+  partner-slow:
+    <<: *parceira
+    container_name: cotacao-partner-slow
+    ports:
+      - "9001:8080"
+    environment:
+      PARTNER_NAME: partner-slow
+      PARTNER_SEED: "20260729"
+      PARTNER_LATENCY_MS: "1500"
+      PARTNER_JITTER_MS: "200"
+
+  # Instavel: 40% das chamadas falham com 503. A taxa nao e sorteada a cada execucao — vem da
+  # semente, entao a sequencia de falhas e a mesma para todos os alunos. Com estes valores, as
+  # primeiras 200 requisicoes contem uma rajada de 9 falhas consecutivas: e o que garante que um
+  # circuit breaker de fato abre (o risco "mocks instaveis de menos" registrado na spec).
+  partner-flaky:
+    <<: *parceira
+    container_name: cotacao-partner-flaky
+    ports:
+      - "9002:8080"
+    environment:
+      PARTNER_NAME: partner-flaky
+      PARTNER_SEED: "20260729"
+      PARTNER_LATENCY_MS: "150"
+      PARTNER_JITTER_MS: "50"
+      PARTNER_FAILURE_RATE: "0.4"
+      PARTNER_FAILURE_STATUS: "503"
+
+  # Degradante: rapida em repouso, afunda conforme as chamadas simultaneas passam de 5. Nao quebra
+  # nunca — so fica cada vez mais lenta, ate 6s. E a parceira que engana o monitoramento ingenuo.
+  partner-degrading:
+    <<: *parceira
+    container_name: cotacao-partner-degrading
+    ports:
+      - "9003:8080"
+    environment:
+      PARTNER_NAME: partner-degrading
+      PARTNER_SEED: "20260729"
+      PARTNER_LATENCY_MS: "120"
+      PARTNER_JITTER_MS: "40"
+      PARTNER_DEGRADE_AFTER: "5"
+      PARTNER_DEGRADE_STEP_MS: "300"
+      PARTNER_DEGRADE_CAP_MS: "6000"
