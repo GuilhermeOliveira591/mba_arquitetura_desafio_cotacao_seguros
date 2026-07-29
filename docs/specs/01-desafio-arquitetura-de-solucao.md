@@ -40,6 +40,13 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
   repositório público `devfullcycle/*` que o aluno **forka**; enunciado no `README.md`; entrega na
   branch `main` com o README substituído pela documentação do processo; correção **estática**
   (sem executar a aplicação); veredito binário aprovado / não aprovado.
+- **Destino do starter** (decidido em 2026-07-29): o starter é construído e publicado **neste
+  repositório**, `GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros`. Ele não nasce em
+  `devfullcycle/*`. O padrão acima permanece como referência de **formato** — fork, enunciado no
+  `README.md`, entrega na `main`, correção estática — não de endereço.
+- **Material das aulas** (decidido em 2026-07-29): o diretório `arquitetura_de_solucao/` é insumo
+  de pesquisa e **não faz parte da árvore do starter**. Ele fica fora do que o aluno forka; o que
+  o desafio precisa do material entra por referência no enunciado, não por cópia do conteúdo.
 
 ## 4. Escopo
 
@@ -153,7 +160,9 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 ## 8. Questões em aberto
 
 - [ ] Nome da empresa fictícia e do produto no cenário de seguros.
-- [ ] Nome do repositório e se ele nasce na organização `devfullcycle` como os demais.
+- [x] ~~Nome do repositório e se ele nasce na organização `devfullcycle` como os demais.~~
+      **Resolvido em 2026-07-29:** este repositório é o definitivo — ver seção 3, "Destino do
+      starter".
 - [ ] Quantas horas de esforço o desafio deve representar para o aluno (define a profundidade dos
       limiares do enunciado).
 - [ ] Os limiares quantitativos concretos: quantos requisitos funcionais, quantos não funcionais,
@@ -166,8 +175,9 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 - [ ] Bug no material de origem: `arquitetura_de_solucao/aws_well_architected_framework/10-sustentabilidade.md`
       é duplicata literal de `09-otimizacao-de-custos.md`. Corrigir na fonte — e decidir se o pilar
       de sustentabilidade entra ou não no escopo do desafio.
-- [ ] O diretório `arquitetura_de_solucao/` (material das aulas) permanece neste repositório ou sai
-      antes da publicação do starter?
+- [x] ~~O diretório `arquitetura_de_solucao/` (material das aulas) permanece neste repositório ou sai
+      antes da publicação do starter?~~ **Resolvido em 2026-07-29:** sai — ver seção 3, "Material
+      das aulas".
 
 ## 9. Tarefas (horizontais)
 
