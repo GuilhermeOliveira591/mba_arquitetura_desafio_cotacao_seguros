@@ -192,9 +192,15 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 - [ ] Os limiares quantitativos concretos: quantos requisitos funcionais, quantos não funcionais,
       quantos ADRs (se houver), quantos spans/métricas obrigatórios, qual formato de evidência
       (screenshot? export de trace? ambos?).
-- [ ] O SAD deve exigir diagramas? Se sim, em qual notação — C4 (citado na aula como referência),
-      UML, ou 4+1? E como código (Mermaid/PlantUML, versionável e verificável) ou imagem?
-- [ ] O aluno entrega um único SAD ou o pacote pode incluir ADRs separados, como no `design-docs-ia`?
+- [x] ~~O SAD deve exigir diagramas? Se sim, em qual notação — C4 (citado na aula como referência),
+      UML, ou 4+1? E como código (Mermaid/PlantUML, versionável e verificável) ou imagem?~~
+      **Resolvido em 2026-07-30:** sim, **C4 em Mermaid**, como código dentro do Markdown — imagem
+      colada não vale, porque o que precisa dar `diff` é o texto. Níveis 1 e 2 obrigatórios, nível 3
+      só da fatia do PoC, nível 4 não é pedido. Ver `docs/enunciado.md`, seção 2, "Regra 3".
+- [x] ~~O aluno entrega um único SAD ou o pacote pode incluir ADRs separados, como no
+      `design-docs-ia`?~~ **Resolvido em 2026-07-30:** **SAD único**. As decisões vão no formato
+      contexto → opções → escolha → consequências dentro da seção 4 do SAD, não como pacote de
+      arquivos separados — ver `docs/enunciado.md`, seção 2.
 - [ ] Há prazo/data de publicação da matéria que restrinja esta entrega?
 - [ ] Bug no material de origem: `arquitetura_de_solucao/aws_well_architected_framework/10-sustentabilidade.md`
       é duplicata literal de `09-otimizacao-de-custos.md`. Corrigir na fonte — e decidir se o pilar
@@ -205,10 +211,11 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 
 ## 9. Tarefas (horizontais)
 
-> **Pressupostos adotados** (Fase 3 seguiu sem resposta às questões em aberto; revisar quando
-> houver decisão): diagramas em **C4 com Mermaid**; **SAD único** com ADRs opcionais embutidos,
-> não pacote separado; esforço-alvo do aluno de **8 a 12 horas**. O terceiro é o mais frágil e
-> é o que dimensiona os limiares quantitativos da tarefa 11.
+> **Pressupostos adotados** (Fase 3 seguiu sem resposta às questões em aberto): diagramas em
+> **C4 com Mermaid**; **SAD único** com decisões embutidas, não pacote separado; esforço-alvo do
+> aluno de **8 a 12 horas**. Os dois primeiros viraram decisão na tarefa 9 e estão marcados como
+> resolvidos na seção 8. O terceiro segue pressuposto, é o mais frágil, e é o que dimensiona os
+> limiares quantitativos da tarefa 11.
 
 ### Épico: Fundação
 
