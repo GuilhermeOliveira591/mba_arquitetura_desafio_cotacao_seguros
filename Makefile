@@ -22,6 +22,20 @@ ps: ## Mostra o estado dos servicos
 logs: ## Acompanha os logs do ambiente
 	$(COMPOSE) logs -f
 
+## --- Cenario de falha ---
+
+# O comando unico do desafio: sobe o ambiente, espera ficar saudavel e roda a carga. `--wait` e o que
+# torna isso confiavel — sem ele a carga comecaria contra uma API que ainda esta subindo, e o
+# relatorio mediria o boot, nao a degradacao.
+.PHONY: reproduce
+reproduce: ## Sobe o ambiente e reproduz o cenario de falha de ponta a ponta
+	$(COMPOSE) up -d --build --wait
+	$(MAKE) load
+
+.PHONY: load
+load: ## Roda o gerador de carga no ambiente ja de pe (ARGS="-concurrency 80" para variar)
+	$(COMPOSE) run --rm --build loadgen $(ARGS)
+
 ## --- Aplicacao (Go) ---
 
 .PHONY: build
@@ -58,5 +72,5 @@ clean: ## Remove os binarios compilados
 help: ## Lista os comandos disponiveis
 	@awk 'BEGIN {FS = ":.*?## "} \
 		/^## ---/ { gsub(/^## /, ""); printf "\n%s\n", $$0; next } \
-		/^[a-zA-Z_-]+:.*?## / { printf "  %-8s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+		/^[a-zA-Z_-]+:.*?## / { printf "  %-10s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""

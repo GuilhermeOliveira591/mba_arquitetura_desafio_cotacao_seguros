@@ -6,6 +6,9 @@
 #
 #   Jaeger      http://localhost:16686   traces
 #   Prometheus  http://localhost:9090    metricas
+#
+# O gerador de carga (servico `loadgen`) fica fora do `up` por estar no perfil `load`: quem o executa
+# e o `make reproduce`, que sobe o ambiente e reproduz a degradacao em um comando so.
 
 # As tres parceiras sao o MESMO binario (cmd/partner-mock). O que muda de uma para a outra e so o
 # bloco de `environment` abaixo — e onde mora, inteiro e legivel, o mau comportamento do desafio.
@@ -60,6 +63,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # Gerador de carga. Nao sobe junto com o ambiente (esta no perfil `load`): ele e um comando, nao um
+  # servico — roda, imprime o relatorio e sai. Rodar dentro da rede do compose e o que permite
+  # reproduzir o cenario de falha sem Go instalado na maquina do aluno: `make reproduce`.
+  loadgen:
+    build:
+      context: .
+      args:
+        CMD: loadgen
+    container_name: cotacao-loadgen
+    profiles: ["load"]
+    environment:
+      # Dentro da rede do compose a API atende pelo nome do servico; o default do binario
+      # (localhost:8080) e o que serve quando o aluno roda `go run ./cmd/loadgen` no host.
+      LOADGEN_TARGET: "http://quotation-api:8080"
+      LOADGEN_TENANT: corretora-a
+    depends_on:
+      quotation-api:
+        condition: service_healthy
 
   # --- Observabilidade -------------------------------------------------------------------------
   # A aplicacao fala com UM destino (o Collector). Quem decide onde o dado cai e o
