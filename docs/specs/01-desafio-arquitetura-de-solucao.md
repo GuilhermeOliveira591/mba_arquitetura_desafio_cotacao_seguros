@@ -181,7 +181,9 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 
 ## 8. Questões em aberto
 
-- [ ] Nome da empresa fictícia e do produto no cenário de seguros.
+- [x] ~~Nome da empresa fictícia e do produto no cenário de seguros.~~
+      **Resolvido em 2026-07-30:** empresa **Prumo Tecnologia em Seguros**, produto
+      **Prumo Cota** — ver `docs/enunciado.md`, seção 1.
 - [x] ~~Nome do repositório e se ele nasce na organização `devfullcycle` como os demais.~~
       **Resolvido em 2026-07-29:** este repositório é o definitivo — ver seção 3, "Destino do
       starter".
