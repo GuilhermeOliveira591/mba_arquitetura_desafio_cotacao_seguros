@@ -324,131 +324,32 @@ flowchart LR
   api -- "consulta prêmio<br/>HTTP/JSON" --> slow
 ```
 
-### 1. Introdução: propósito, escopo, restrições, pressupostos
+### As oito seções
 
-Diga para quem o documento serve e qual decisão ele sustenta. Delimite o escopo pelos dois lados: o
-SAD cobre a plataforma de cotação e a sua **fronteira** com as seguradoras, e não redesenha o motor
-de precificação delas nem o CRM da corretora. Separe o que é **restrição** (imposta: Go, ambiente
-local sem custo, três parceiras, cobrança por consulta, retenção de cinco anos, papel de operadora)
-do que é **decisão** (sua: TTL, limiares do breaker, onde a plataforma roda); confundir os dois faz
-o documento perder autoridade, porque ninguém defende uma escolha que apresenta como imposição. E
-declare cada pressuposto com valor, origem e **consequência se ele for falso**: "assumo que 30% das
-cotações se repetem em até uma hora; se for 5%, o cache não se paga e a seção 8 muda de veredito".
+O que cada uma precisa conter, com os contra-exemplos que costumam aparecer no lugar do conteúdo,
+está em **[`docs/guia-sad.md`](docs/guia-sad.md)**. Leia antes de escrever. Em resumo:
 
-- **Não conta:** pressuposto sem consequência declarada. É enfeite, não pressuposto.
+1. **Introdução:** propósito, escopo, restrições separadas das decisões, e pressupostos com valor,
+   origem e consequência se forem falsos.
+2. **Visão geral:** o antes e o depois em C4 nível 1 e 2, mais o delta em lista.
+3. **Requisitos funcionais e não funcionais**, com o "hoje" medido por você.
+4. **Detalhamento:** as decisões de breaker, cache e fallback, com todo parâmetro numérico
+   justificado e a chave de cache escrita por extenso, mais o C4 nível 3 da fatia implementada.
+5. **Implementação:** como se constrói (mecanismo para arquivo real) e onde roda (on-premise, cloud
+   ou híbrido, decidido pelo compliance).
+6. **Operação e gestão de mudanças:** o que se olha, com que limiar, qual ação, mais um runbook e o
+   caminho de mudança do TTL.
+7. **Recuperação de desastres:** RTO e RPO por classe de dado, e três cenários.
+8. **Tecnologias, custos e pessoal:** a conta de parceiro por hit rate, a infraestrutura, o pessoal
+   e o veredito de payback.
 
-### 2. Visão geral da arquitetura
-
-Uma página com o **antes** e o **depois**, nos diagramas C4 de nível 1 e 2. O "antes" não é
-imaginação: os contêineres estão no `docker-compose.yml` e os nomes têm que bater (`quotation-api`,
-`partner-slow`, `partner-flaky`, `partner-degrading`, `redis`, `otel-collector`, `jaeger`,
-`prometheus`). O nível 1 mostra os atores externos, a corretora e as três seguradoras, e deixa
-visível o que o Cenário afirma: a Prumo intermedeia, não precifica. Feche com o **delta** em lista,
-o que você acrescenta, o que muda de lugar e o que sai, e um parágrafo curto de "a quem esta
-arquitetura serve".
-
-- **Reprova:** contêiner no diagrama que não existe nem no compose nem na sua entrega. É o caso mais
-  comum de violação da regra 1.
-
-### 3. Requisitos funcionais e não funcionais
-
-Os funcionais saem do contrato que já existe, não da sua cabeça: `POST /quotes` exige `X-Tenant-Id`,
-a resposta agrega as três parceiras ordenadas por prêmio (`internal/quotation/service.go`), toda
-cotação apresentada fica auditável por cinco anos, e resposta de cache ou de fallback continua
-rastreável até a consulta que a originou. Escreva cada um como frase testável, com identificador
-(RF-01 em diante), e acrescente os que a **sua** arquitetura cria. Os não funcionais vão em tabela,
-e o "hoje" é medido por você com `make reproduce`, não estimado:
-
-| ID | Requisito | Métrica | Hoje | Alvo | Como medir | Por que este número |
-|---|---|---|---|---|---|---|
-| RNF-01 | Latência da cotação | p95 do `POST /quotes` | 8,01 s sob carga (medição do roteiro, feita em outra máquina; use a sua) | *sua decisão* | `http_server_request_duration_seconds` | *sua justificativa* |
-
-A coluna que separa o arquiteto do preenchedor de template é a última. Um alvo de p95 vem do tempo
-que o corretor aguenta esperar com o cliente na frente dele, do SLA que a Prumo vende, ou da soma
-das parceiras no melhor caso. "Porque é um bom número" não é origem.
-
-- **Não conta:** qualquer não funcional sem número ou sem método de medição.
-
-### 4. Detalhamento da arquitetura
-
-O coração do documento. Cada decisão no formato **contexto → opções consideradas → escolha →
-consequências, inclusive as ruins**, e no mínimo três: circuit breaker, cache e fallback. Todo
-parâmetro numérico precisa da sua defesa: por que o breaker abre com N falhas em uma janela de M
-segundos e não com outro par, quantas requisições o meio aberto deixa passar, qual o TTL do cache
-diante do teto de 24 horas e por que parar antes dele. Escreva a **chave do cache literalmente**: se
-`tenant_id` não estiver nela, você projetou um incidente de dados pessoais, não uma otimização. E
-diga o que o fallback devolve, como o cliente sabe que aquilo é fallback, e como a resposta segue
-auditável. O C4 de nível 3 mora aqui, cobrindo a fatia protegida: `internal/partner/client.go` e
-`internal/quotation/service.go`.
-
-- **Não conta:** "usaremos circuit breaker" sem os três estados, sem limiar e sem janela. É
-  exatamente a frase que este desafio existe para tornar impossível.
-
-### 5. Implementação
-
-Duas perguntas. **Como se constrói:** o mapa de cada mecanismo para o arquivo real do repositório
-onde ele nasce, qual biblioteca e por que ela (a que expõe os três estados explicitamente vale mais
-que a mais estrelada), e como o comportamento é testado sem depender de sorte, no padrão de
-`cmd/partner-mock/feasibility_test.go`. **Onde roda:** on-premise, cloud ou híbrido, decidido pelo
-compliance do domínio, com pelo menos uma alternativa descartada e o motivo regulatório e financeiro
-dela. Some o custo, que reaparece na seção 8.
-
-- **Não conta:** "cloud é o padrão de mercado". Isso não é argumento, é ausência de argumento.
-
-### 6. Operação e gestão de mudanças
-
-O SAD é lido em produção, sob pressão. A observabilidade da entrega 2 é o instrumento desta seção:
-diga **o que se olha** (estado do breaker, hit rate do cache, latência por parceira), **qual limiar
-dispara alerta** e **qual ação o alerta exige**. Escreva pelo menos um **runbook** completo de um
-cenário real, como "o breaker da `partner-degrading` está aberto há dez minutos", com o que o
-plantonista faz, o que ele **não** faz e quando escala. E trate a gestão de mudanças pelo caso que
-importa aqui: o TTL do cache é parâmetro de **negócio**, porque mexe em risco de preço vencido e em
-custo. Quem aprova mudá-lo, como ele chega em produção, como se reverte e como se mede se melhorou.
-
-- **Não conta:** "monitoraremos com Prometheus e Grafana". Isso é uma lista de compras. Alerta sem
-  limiar e sem ação também não é alerta, é ruído.
-
-### 7. Recuperação de desastres
-
-RTO e RPO com número, e **por classe de dado**, porque elas não valem o mesmo: perder o cache custa
-dinheiro e latência, perder o registro de auditoria é infração regulatória. Cubra no mínimo três
-cenários: (a) o Redis inteiro se perde; (b) uma parceira fica fora por seis horas; (c) perda do site
-ou da região. Para cada um: o que a corretora vê, o que **degrada** e o que **para** (não é a mesma
-coisa), quanto custa em reais o modo degradado, e o caminho de volta. O cenário (a) tem endereço na
-seção 8: cache vazio é 100% das consultas compradas de novo.
-
-- **Não conta:** um RPO único para todas as classes de dado. É sinal de que a seção não foi pensada.
-
-### 8. Tecnologias, custos e pessoal (TCO)
-
-A seção que fecha o circuito: a linha de código da entrega 2 tem que aparecer aqui como dinheiro.
-Os números de partida estão no Cenário. Entregue quatro coisas. Primeira, **a conta de parceiro por
-cenário**: uma linha para hoje (hit rate zero) e uma para cada hit rate que o **seu** TTL sustenta,
-com hit rate assumido, consultas compradas por mês, custo mensal, economia contra hoje e percentual
-da receita. Segunda, **o custo da infraestrutura que você acrescenta**: Redis, retenção de traces e
-métricas, e o armazenamento de auditoria, que **cresce todo mês** e precisa de cinco anos, então
-mostre pelo menos o ano 1 e o ano 5. Terceira, **pessoal**: quantas pessoas, quais papéis, para
-construir e depois para operar, com custo mensal. Quarta, **o veredito**: o cache se paga, em quanto
-tempo? Se a resposta for "não", diga; um SAD que conclui contra a solução preferida, com a conta na
-mão, vale mais que um que conclui a favor sem ela.
-
-**É aqui que o documento é testado por coerência.** O hit rate desta seção tem que ser compatível
-com o TTL da seção 4 e com o pressuposto de recotação da seção 1. TTL de quinze minutos sustentando
-70% de acerto exige explicação; sem ela, o número é chute, e um chute na planilha contamina a
-decisão que ele sustenta.
-
-- **Não conta:** preço de instância copiado de calculadora sem dizer quantas instâncias e por quê.
-
-### O que este SAD não é
-
-Não é um template preenchido, e a diferença é verificável de fora: **cada seção referencia outra**.
-O requisito da seção 3 aparece como mecanismo na 4, como arquivo na 5, como alerta na 6, como
-cenário de desastre na 7 e como reais na 8. Um documento em que as oito seções poderiam ser lidas em
+O que separa um SAD de um template preenchido é verificável de fora: **cada seção referencia
+outra**. O requisito da seção 3 aparece como mecanismo na 4, como arquivo na 5, como alerta na 6,
+como cenário de desastre na 7 e como reais na 8. Um documento em que as oito poderiam ser lidas em
 qualquer ordem, sem que nada quebrasse, é oito documentos curtos, não um SAD.
 
-Também não é longo por obrigação. **De 10 a 20 páginas equivalentes** é a faixa esperada, como
-orientação e não como regra: abaixo dela é provável que alguma seção tenha ficado sem conteúdo;
-acima, releia procurando enchimento.
+**De 10 a 20 páginas equivalentes** é a faixa esperada, como orientação e não como regra: abaixo
+dela é provável que alguma seção tenha ficado sem conteúdo; acima, releia procurando enchimento.
 
 ## Requisitos: entrega 2, o PoC
 
@@ -757,6 +658,7 @@ README.md                        # o README do processo (substitui este enunciad
 docs/enunciado.md                # este enunciado, preservado para as citacoes da regra 1
 docs/sad.md                      # o SAD completo, as oito secoes
 docs/evidencias/                 # as evidencias, referenciadas pelo README
+docs/guia-sad.md                 # do starter (nao alterar)
 docs/roteiro-cenario-de-falha.md # do starter (nao alterar)
 docs/smoke-test-factibilidade.md # do starter (nao alterar)
 cmd/partner-mock/                # do starter (nao alterar)
@@ -805,7 +707,8 @@ existir assim que você mexer no código.
 
 **3.** Ache a cascata em série no Jaeger, seguindo `docs/roteiro-cenario-de-falha.md`.
 
-**4.** Escreva as seções 1 a 4 do SAD. É o documento que fixa TTL, limiares e escopo do breaker.
+**4.** Leia `docs/guia-sad.md` e escreva as seções 1 a 4 do SAD. É o documento que fixa TTL,
+limiares e escopo do breaker.
 
 **5.** Implemente os três mecanismos, um de cada vez, com o teste determinístico junto.
 
