@@ -306,3 +306,211 @@ em qualquer ordem, sem que nada quebrasse, é oito documentos curtos — não um
 Também não é um documento longo por obrigação. Quantos requisitos, quantos diagramas e quantas
 páginas estão reunidos no bloco **Critérios quantitativos**, no fim deste enunciado, e é lá que
 você confere se entregou o suficiente.
+
+## 3. Entrega 2 — o PoC
+
+A segunda entrega é código: a fatia do seu SAD construída sobre o starter e **provada em execução**.
+Ela é pequena de propósito. Não é aqui que você mostra fôlego de desenvolvedor — é aqui que você
+mostra que a arquitetura que defendeu no documento sobrevive ao contato com a `partner-flaky`.
+
+A subordinação ao SAD é literal, e vale nos dois sentidos. O documento **pode** propor mais do que o
+PoC implementa, desde que diga qual fatia foi implementada e qual ficou como proposta. O que não
+pode existir é o contrário: um limiar de breaker ou um TTL que aparece no código sem estar defendido
+na seção 4 do SAD é um número chutado, mesmo que funcione. Se você descobrir implementando que a
+decisão do documento estava errada — ótimo, é para isso que serve um PoC. **Volte e corrija o SAD**,
+dizendo o que a medição mostrou. Divergência entre os dois é o que perde ponto; mudar de ideia com
+evidência na mão é o que se espera de um arquiteto.
+
+### Três mecanismos, e o freio de mão
+
+Você constrói exatamente isto:
+
+1. **Circuit breaker** com os três estados explícitos, na fronteira com as parceiras.
+2. **Cache** com política de invalidação declarada e justificada.
+3. **Fallback** para quando a parceira não responde.
+
+Mais **timeout** e, se você quiser, **paralelizar a agregação** — dois acompanhantes baratos que a
+seção 4 do seu SAD provavelmente vai defender de qualquer jeito.
+
+E nada além disso. Retry com backoff, bulkhead, rate limiting, fila, autenticação, persistência de
+auditoria de verdade, Kubernetes: **não implemente**. Cite no SAD o que fizer sentido citar — lá é o
+lugar de propor. Aqui, cada mecanismo a mais é tempo que sai das evidências e vai para o plumbing, e
+o que está sendo avaliado é a decisão, não a quantidade de padrões que você conhece. Se você está
+escrevendo o quarto pattern, você saiu da matéria.
+
+O vácuo que você preenche está identificado no código, sem mistério: `internal/partner/client.go`
+(cliente sem timeout, sem proteção, sem fallback) e `internal/quotation/service.go` (agregação em
+série, tudo ou nada). O Redis já sobe no compose — sem persistência, de propósito — e a API ainda
+**não fala com ele**: essa ligação é sua.
+
+### Circuit breaker — os três estados têm que ser visíveis de fora
+
+Fechado, aberto e meio aberto não são jargão de prova: são três comportamentos diferentes, e a sua
+entrega precisa mostrar os três acontecendo. O que costuma passar batido é o significado operacional
+do estado aberto: **aberto quer dizer que a parceira não é chamada**. Se a requisição sai e o
+resultado é descartado, você não economizou o R$ 0,04 da consulta nem o tempo de espera — você
+escreveu um contador de falhas com nome bonito.
+
+Decida e defenda o **escopo** do breaker: um por parceira, um por par (parceira, corretora), ou um
+só para todas. Um breaker global é a decisão que derruba a plataforma inteira porque uma das três
+afundou — pode ser defendida, mas dificilmente é o que você quer num agregador de três fornecedores
+independentes.
+
+Os parâmetros vêm do SAD: quantas falhas em qual janela abrem, quanto tempo o circuito fica aberto,
+quantas requisições o meio aberto deixa passar, o que fecha e o que reabre. E o comportamento se
+testa **sem depender de sorte**: o starter mostra o padrão em
+`cmd/partner-mock/feasibility_test.go`, e `docs/smoke-test-factibilidade.md` documenta a rajada de
+nove falhas consecutivas nas sequências 49 a 57 da `partner-flaky` — você sabe de antemão onde o
+breaker deve abrir.
+
+- **Mínimo verificável:** os três estados nomeados no código; o estado aberto realmente não chama a
+  parceira; escopo do breaker declarado; parâmetros idênticos aos da seção 4 do SAD.
+- **Não conta:** biblioteca importada e configurada sem uma única evidência de transição de estado.
+  É a versão em código da frase "usaremos circuit breaker".
+
+### Cache — a chave é o contrato de isolamento
+
+Escreva a **chave por extenso**, no SAD e no README do processo. Ela precisa conter, no mínimo, a
+corretora e a identificação normalizada do risco cotado; se o seu cache é por parceira ou pela
+cotação agregada é decisão sua, com consequência sua — cache por parceira sobrevive a uma parceira
+fora, cache agregado economiza mais e vence inteiro de uma vez.
+
+> **Chave de cache sem `tenant_id` reprova.** Não é rigor de estilo: é a mesma placa devolvendo à
+> corretora A o prêmio negociado pela corretora B — erro de preço e incidente de dados pessoais, com
+> dever de notificação à ANPD. É o único defeito isolado do PoC que reprova sozinho.
+
+O **TTL é decisão de negócio**, e tem teto: a seguradora honra o prêmio informado por até 24 horas.
+Um TTL maior que isso não é cache agressivo, é cotação que ninguém honra. Parar antes das 24h é o
+esperado — mas diga por quê, e o número que você escolher aqui é o mesmo que sustenta o hit rate da
+planilha da seção 8 do seu SAD.
+
+TTL, porém, não é a política inteira. Declare também: o que acontece com a entrada quando o breaker
+abre (a cotação vencida ainda é servida? por quanto tempo a mais? a corretora fica sabendo?), o que
+invalida uma entrada antes da hora, e como as entradas somem quando têm que sumir — o Redis do
+starter é efêmero, mas prazo de descarte de dado pessoal é obrigação da LGPD, não configuração de
+container.
+
+E a resposta servida de cache continua sendo uma cotação apresentada a um consumidor: ela precisa
+seguir **auditável para a SUSEP**, rastreável até a consulta original que a produziu e o instante em
+que ela foi comprada.
+
+- **Mínimo verificável:** chave escrita por extenso e contendo a corretora; TTL justificado contra a
+  janela de 24 horas; política de invalidação declarada; resposta de cache distinguível e
+  rastreável.
+- **Reprova:** chave sem isolamento por corretora.
+
+### Fallback — o que a corretora recebe quando não há resposta
+
+Hoje a cotação morre: uma parceira falha e a requisição inteira vira 502, jogando fora as respostas
+que já tinham chegado (`internal/quotation/service.go`). Decidir o que colocar no lugar disso é a
+parte mais próxima do negócio de todo o PoC. Três saídas são legítimas, e você escolhe uma e
+defende:
+
+- **resposta parcial** — entrega as parceiras que responderam e diz explicitamente qual faltou;
+- **cotação anterior** — serve do cache, marcada como tal, com a idade dela na resposta;
+- **recusa explícita** — se o produto não admite proposta incompleta, um erro de negócio claro,
+  distinguível de um erro genérico, com o que a corretora deve fazer.
+
+O que não é legítimo é **inventar um prêmio**. Um preço fabricado apresentado ao consumidor é
+problema regulatório, não bug de aplicação.
+
+Em qualquer das três, a corretora tem que saber que aquilo é degradado — o que significa que o
+contrato de resposta muda (`Response`, em `internal/quotation/request.go`), e a mudança tem que
+estar documentada. E, de novo: se a resposta de fallback chega ao consumidor, ela é auditável como
+qualquer outra.
+
+- **Mínimo verificável:** comportamento sob parceira fora implementado e refletido no contrato de
+  resposta; a degradação é visível para quem chama; a escolha entre as opções está defendida no SAD.
+- **Não conta:** log dizendo "fallback acionado" enquanto o cliente continua recebendo 502.
+
+### Instrumentação — é o seu método de prova, não um segundo exercício
+
+Não se pede observabilidade aqui para você exercitar OpenTelemetry. Pede-se porque **nenhuma
+afirmação desta entrega vale sem o dado que a sustenta**: "o breaker abre" se prova com a série
+temporal do estado, não com o parágrafo dizendo que abre. Essa é a razão de o starter já entregar o
+SDK, o Collector, o Jaeger e o Prometheus de pé (`internal/platform/telemetry.go`) — o plumbing não
+é o exercício, e três horas gastas nele são três horas roubadas do que está sendo avaliado.
+
+O que já vem pronto é genérico: HTTP de entrada, HTTP de saída e runtime do Go. O que falta é o de
+negócio, e são três coisas:
+
+1. **Transição de estado do breaker**, por parceira, com origem e destino. Você precisa conseguir
+   desenhar o degrau fechado → aberto → meio aberto → fechado no tempo — um valor observável do
+   estado atual, um contador de transições, ou os dois. E a requisição que foi curto-circuitada tem
+   que dizer isso no trace (evento ou atributo no span), senão ela aparece como uma cotação
+   misteriosamente rápida.
+2. **`hit` e `miss` do cache**, com atributo que permita calcular o hit rate em PromQL. Este é o
+   número que alimenta a planilha da seção 8 do SAD; sem ele, a economia que você projeta é chute.
+3. **Latência por parceira**, com significado de domínio. Hoje ela existe só pela borda HTTP
+   (`http_client_request_duration_seconds`, atributo `server_address`). Reaproveitar essa métrica é
+   legítimo — desde que você diga que reaproveitou, e mostre a consulta.
+
+**Atributo é dado retido.** `tenant_id` (algumas centenas de valores) é útil e aceitável. **CPF,
+placa e `quote_id` não entram em span nem em métrica**: além de dado pessoal fora de lugar, placa em
+rótulo de métrica é cardinalidade sem teto — dois problemas por uma decisão preguiçosa. E
+instrumente pouco: span por função e métrica por variável não é observabilidade, é ruído com custo
+de retenção, e a seção 6 do seu SAD vai ter que explicar quem olha aquilo.
+
+- **Mínimo verificável:** as três instrumentações no código, com os nomes de métrica e de atributo
+  declarados no README do processo; a consulta que lê cada uma escrita na entrega; nenhum dado
+  pessoal em atributo.
+- **Não conta:** métrica citada na documentação que o código não emite. É a regra 1 aplicada ao
+  código — quem corrige procura o nome no repositório.
+
+### Evidências — o formato
+
+Uma evidência tem três partes: **o comando ou a consulta que a gerou**, **o artefato** e **uma
+legenda de uma linha dizendo o que se vê nele**. Faltando qualquer uma, é figura decorativa. Tudo
+mora em `docs/evidencias/` e é referenciado do README do processo — arquivo que ninguém consegue
+abrir não conta como entregue.
+
+**O "antes" é seu.** Rode `make down && make reproduce` na sua máquina *antes* de tocar no código.
+Os números de `docs/roteiro-cenario-de-falha.md` foram medidos em outra máquina; copiá-los é
+apresentar ficção como fato, que é exatamente o que a regra 1 reprova. As latências vão diferir das
+de lá, e tudo bem — o que se compara é o seu antes com o seu depois.
+
+O conjunto mínimo:
+
+| Evidência | Formato | O que ela tem que mostrar |
+|---|---|---|
+| Relatório antes/depois | **texto colado**, saída completa do `make reproduce`, mesma carga nas duas | a diferença de p95, de taxa de sucesso e de vazão |
+| Trace com breaker aberto | screenshot ou export JSON do Jaeger | a requisição que **não chamou** a parceira curto-circuitada, e respondeu rápido |
+| Trace servido de cache | screenshot ou export JSON do Jaeger | a cotação sem os spans de saída para as parceiras |
+| Estado do breaker no tempo | gráfico **com a consulta PromQL colada como texto** | o degrau fechado → aberto → meio aberto → fechado |
+| Hit rate do cache | gráfico **com a consulta** | a curva subindo conforme o cache aquece |
+| p95 do `POST /quotes` | gráfico **com a consulta** | antes e depois, na mesma escala |
+
+Três regras de formato que decidem se a evidência é verificável:
+
+1. **Relatório vai como texto, não como imagem.** Texto dá `diff`, dá busca e cabe na revisão.
+2. **Gráfico sem a consulta ao lado não vale.** Quem corrige precisa poder repetir a leitura; um
+   gráfico é uma afirmação, a consulta é a fonte dela.
+3. **Toda evidência declara a janela de tempo** — `Last Hour` no Jaeger, `[5m]` no PromQL. Um
+   gráfico sem janela pode estar mostrando qualquer coisa.
+
+- **Mínimo verificável:** o conjunto da tabela acima, cada item com comando/consulta e legenda,
+  todos referenciados do README do processo. Quantos itens além do mínimo, no bloco **Critérios
+  quantitativos**.
+- **Não conta:** screenshot de dashboard sem a consulta; evidência que mostra a métrica existindo
+  mas nunca mudando de valor — o que se pede é a **transição**, não a existência.
+- **Reprova:** "antes" copiado do roteiro ou de outro aluno.
+
+### Os testes e os defaults do starter
+
+`make test` tem que passar, incluindo os testes que já vieram — quebrar o starter para o seu código
+caber é regressão, não refatoração. E o comportamento resiliente se testa como o starter já ensina
+em `cmd/partner-mock/feasibility_test.go`: determinístico, sem `sleep` e sem esperar que a sorte
+coopere. A rajada documentada da `partner-flaky` existe justamente para isso.
+
+Os perfis das parceiras (`PARTNER_SEED`, `PARTNER_FAILURE_RATE`, latências) são **restrição, não
+decisão**. Mexer neles para o breaker abrir mais fácil é resolver o exercício mudando o enunciado, e
+invalida a evidência principal. Rodar uma variação declarada — outra taxa de falha, para explorar o
+limiar — é legítimo e até interessante, desde que a evidência que sustenta a sua entrega venha dos
+defaults, e que `make smoke` continue verde.
+
+### O que este PoC não é
+
+Não é produto, não é o starter reescrito e não é lugar de mostrar repertório de padrões. São três
+mecanismos, a instrumentação que prova que eles funcionam, e as evidências. Se ao fim você tem um
+sistema mais bonito e nenhum gráfico mostrando o breaker abrir, você entregou a metade que não
+estava sendo pedida.
