@@ -514,3 +514,81 @@ Não é produto, não é o starter reescrito e não é lugar de mostrar repertó
 mecanismos, a instrumentação que prova que eles funcionam, e as evidências. Se ao fim você tem um
 sistema mais bonito e nenhum gráfico mostrando o breaker abrir, você entregou a metade que não
 estava sendo pedida.
+
+## 4. Critérios quantitativos e regras de entrega
+
+Todo número deste desafio está neste bloco. O resto do enunciado diz o que se espera e por quê; aqui
+está **quanto** — para que você saiba quando parou de faltar, e para que dois corretores diferentes
+cheguem ao mesmo veredito lendo a mesma entrega.
+
+Os valores abaixo estão dimensionados para um esforço de **8 a 12 horas** e são **mínimos, não
+alvos**. Bater o mínimo em tudo é uma entrega aprovável; não é uma entrega boa.
+
+### Entrega 1 — o SAD
+
+| O que | Mínimo | Onde |
+|---|---|---|
+| Requisitos funcionais, com identificador e frase testável | 6, sendo ao menos 2 criados pela sua arquitetura | seção 3 do SAD |
+| Requisitos não funcionais, com métrica, valor, unidade, método e origem do alvo | 5, sendo ao menos 3 com a coluna "hoje" medida por você | seção 3 do SAD |
+| Pressupostos com valor, origem e consequência se forem falsos | 3 | seção 1 do SAD |
+| Diagramas C4 em Mermaid | 4: nível 1, nível 2 do "antes", nível 2 do "depois" e nível 3 da fatia implementada | seções 2 e 4 do SAD |
+| Decisões no formato contexto → opções → escolha → consequências, cada uma com ao menos uma alternativa descartada e as consequências ruins | 4: circuit breaker, cache, fallback e hospedagem | seções 4 e 5 do SAD |
+| Alertas com métrica, limiar e ação | 3 | seção 6 do SAD |
+| Runbook completo, do sintoma ao escalonamento | 1 | seção 6 do SAD |
+| Cenários de desastre, com efeito no cliente, custo do modo degradado e caminho de volta | 3: Redis perdido, parceira fora por seis horas, perda do site ou da região | seção 7 do SAD |
+| Linhas na conta de parceiro | 3: hoje (hit rate zero) e ao menos 2 hit rates que o seu TTL sustente | seção 8 do SAD |
+| Horizonte do custo de auditoria | ano 1 e ano 5 | seção 8 do SAD |
+
+**Extensão: de 10 a 20 páginas equivalentes.** Isso é orientação, não regra — ninguém conta páginas
+na correção. Abaixo da faixa é provável que alguma seção tenha ficado sem conteúdo; acima dela,
+releia procurando enchimento, porque nenhum dos três leitores da seção 2 chega à página trinta.
+
+### Entrega 2 — o PoC
+
+| O que | Mínimo |
+|---|---|
+| Mecanismos implementados | 3: circuit breaker, cache e fallback. Timeout e paralelização da agregação são bem-vindos, mas não contam como um dos três |
+| Métricas de negócio, com o nome declarado no README do processo | 3: estado ou transição do breaker, `hit`/`miss` do cache, latência por parceira |
+| Marcações no trace | 2: a requisição curto-circuitada pelo breaker e a resposta servida de cache |
+| Testes determinísticos do comportamento resiliente | 2 (um do breaker abrindo, um do cache ou do fallback), com `make test` verde |
+| Evidências | as 6 linhas da tabela da seção 3, cada uma com o comando ou a consulta que a gerou e a legenda |
+
+**Formato dos arquivos de evidência:** relatórios em texto; imagens em PNG ou JPG legíveis em
+tamanho real; export de trace do Jaeger em JSON, que é melhor que screenshot e ocupa menos. Nada de
+PDF com print dentro. Arquivo de imagem acima de 5 MB é sinal de que você exportou a tela errada.
+
+### Regras de entrega
+
+1. **Forke este repositório.** A entrega vive no seu fork, público.
+2. **Entregue na branch `main`.** O que estiver em outra branch não é lido.
+3. **O `README.md` deixa de ser este enunciado** e passa a ser o **README do processo**, a porta de
+   entrada da sua entrega.
+4. **Estrutura esperada** (o código fica nas pastas do próprio starter):
+
+   ```
+   README.md              # o README do processo, substituindo este enunciado
+   docs/sad.md            # o SAD completo, as oito secoes
+   docs/evidencias/       # as evidencias, referenciadas pelo README
+   ```
+
+5. **A correção é estática:** quem corrige **não roda** a sua aplicação. O que só existe em execução
+   não conta como entregue.
+6. **O veredito é binário:** aprovado ou não aprovado.
+
+O README do processo é curto e tem cinco coisas: link para o SAD e para as evidências; como subir o
+ambiente e reproduzir a sua versão; **o que foi implementado e o que ficou como proposta**; os nomes
+das métricas e dos atributos que você criou; e o que você faria diferente com mais tempo.
+
+### O que reprova sozinho
+
+Consolidando o que já apareceu ao longo do enunciado — cada um destes decide o veredito por si, sem
+compensação pelo resto da entrega:
+
+1. **Ficção apresentada como fato.** Arquivo, biblioteca, métrica ou endpoint citado como existente
+   sem existir (regra 1, seção 2). Propor o que ainda não existe é permitido e esperado — desde que
+   esteja marcado como proposta.
+2. **Chave de cache sem isolamento por corretora** (seção 3).
+3. **Evidência que não é sua.** "Antes" copiado do roteiro, de outra máquina ou de outro aluno
+   (seção 3).
+4. **Meia entrega.** SAD sem PoC, ou PoC sem SAD. As duas metades são uma coisa só — é exatamente o
+   que este desafio existe para exigir.

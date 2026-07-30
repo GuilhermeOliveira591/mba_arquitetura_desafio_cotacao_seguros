@@ -188,10 +188,17 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
       **Resolvido em 2026-07-29:** este repositório é o definitivo — ver seção 3, "Destino do
       starter".
 - [ ] Quantas horas de esforço o desafio deve representar para o aluno (define a profundidade dos
-      limiares do enunciado).
-- [ ] Os limiares quantitativos concretos: quantos requisitos funcionais, quantos não funcionais,
+      limiares do enunciado). **Adotado em 2026-07-30:** 8 a 12 horas, publicado no bloco de
+      critérios quantitativos (`docs/enunciado.md`, seção 4). Segue como **pressuposto**, não como
+      decisão: a primeira turma é o teste.
+- [x] ~~Os limiares quantitativos concretos: quantos requisitos funcionais, quantos não funcionais,
       quantos ADRs (se houver), quantos spans/métricas obrigatórios, qual formato de evidência
-      (screenshot? export de trace? ambos?).
+      (screenshot? export de trace? ambos?).~~ **Resolvido em 2026-07-30:** todos os números estão em
+      `docs/enunciado.md`, seção 4 — 6 RFs, 5 RNFs, 4 diagramas C4, 4 decisões, 3 alertas, 3 cenários
+      de desastre, 3 métricas de negócio, 2 marcações no trace, 2 testes determinísticos e 6
+      evidências. ADRs separados não existem (SAD único), então o limiar equivalente é o de decisões
+      dentro da seção 4 do SAD. Formato de evidência: os dois — screenshot ou export JSON do Jaeger,
+      com preferência declarada pelo JSON.
 - [x] ~~O SAD deve exigir diagramas? Se sim, em qual notação — C4 (citado na aula como referência),
       UML, ou 4+1? E como código (Mermaid/PlantUML, versionável e verificável) ou imagem?~~
       **Resolvido em 2026-07-30:** sim, **C4 em Mermaid**, como código dentro do Markdown — imagem
