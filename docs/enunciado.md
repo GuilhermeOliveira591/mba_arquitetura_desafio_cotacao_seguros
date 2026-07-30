@@ -72,7 +72,151 @@ cotou não é bug — é incidente de dados pessoais, com dever de notificação
 3. **Disponibilidade é promessa comercial.** Hoje a disponibilidade do Prumo Cota é o *produto* da
    disponibilidade das três parceiras. Quem vende para corretora não pode entregar isso.
 
-## 2. Entrega 1 — o SAD
+## 2. O starter
+
+O que você forkou é o Prumo Cota como ele está hoje: uma plataforma que **funciona e é ruim**. Tudo
+o que você precisa para reproduzir o problema já está aqui; nada do que o resolve está. Suba,
+quebre, meça — e só então volte para as duas entregas.
+
+### Suba em um comando
+
+Você precisa de **Docker com Compose v2**, e mais nada: sem conta em cloud, sem chave de API, sem
+custo. Go 1.25 só é necessário se você quiser rodar a API fora do container.
+
+```bash
+make up     # docker compose up -d --build --wait
+make ps     # lista os oito servicos do ambiente e o estado de cada um
+```
+
+Na primeira vez as imagens são compiladas — conte com cerca de um minuto a mais. Se `make` não
+existir na sua máquina, todo alvo do `Makefile` é uma linha de `docker compose` ou de `go`, e o
+`make help` lista todos.
+
+| Serviço | Endereço | Para quê |
+|---|---|---|
+| `quotation-api` | <http://localhost:8080> | a API que você vai proteger |
+| Jaeger | <http://localhost:16686> | os traces |
+| Prometheus | <http://localhost:9090> | as métricas |
+| `partner-slow` · `partner-flaky` · `partner-degrading` | portas 9001 · 9002 · 9003 | as parceiras, direto, sem passar pela API |
+| Redis | `localhost:6379` | o cache que ainda não existe |
+| OTel Collector | `localhost:4317` (gRPC) e `4318` (HTTP) | destino da telemetria |
+
+A primeira cotação:
+
+```bash
+curl -s localhost:8080/quotes \
+  -H 'Content-Type: application/json' \
+  -H 'X-Tenant-Id: corretora-a' \
+  -d '{"driver":{"document":"12345678901","birth_year":1985},
+       "vehicle":{"plate":"ABC1D23","model":"Onix 1.0","year":2020,"value_cents":7500000},
+       "coverage":"comprehensive"}'
+```
+
+Ela demora **cerca de 1,9 s no melhor caso** — a soma das três parceiras consultadas em série — e
+tem chance real de voltar **502**, porque a `partner-flaky` derruba 40% das chamadas. As duas coisas
+são o desafio, não erro de instalação.
+
+`make down` derruba tudo e **zera o cenário**. Nada é persistido, de propósito: o Jaeger guarda
+traces em memória, o Redis sobe sem AOF nem RDB, e o contador de sequência das parceiras vive no
+processo. É isso que faz o "antes" e o "depois" serem comparáveis.
+
+### O contrato que já existe
+
+| Rota | O que faz |
+|---|---|
+| `POST /quotes` | cotação agregada das três parceiras; exige o cabeçalho `X-Tenant-Id` |
+| `GET /healthz` | saúde do processo |
+
+O comportamento está em `internal/quotation/handler.go` e não tem surpresa: **400** sem
+`X-Tenant-Id` ou com corpo inválido, **403** para corretora fora da lista (`TENANTS`, que o compose
+define como `corretora-a,corretora-b`), **502** quando qualquer parceira falha — com o nome dela no
+corpo do erro — e **200** com as três cotações ordenadas da mais barata para a mais cara.
+
+Repare em quem vai onde: a **corretora viaja no cabeçalho**, o CPF e a placa viajam no corpo. O
+inquilino é contexto da chamada, não dado de seguro — e é essa separação que a sua chave de cache
+vai ter que respeitar.
+
+### O mapa do código
+
+São **menos de 800 linhas de Go** entre a API e o `internal/` (sem contar testes). Dá para ler tudo
+em vinte minutos, e vale a pena antes de decidir qualquer coisa.
+
+| Caminho | O que é | Você mexe aqui? |
+|---|---|---|
+| `cmd/quotation-api/main.go` | boot da API: configuração, telemetria, rotas | provavelmente, para ligar o que você construir |
+| `internal/quotation/handler.go` | contrato HTTP e validação do inquilino | talvez, se o fallback mudar a resposta |
+| `internal/quotation/service.go` | agregação em série, tudo ou nada | **sim** — é onde cache e fallback aparecem |
+| `internal/quotation/request.go` | corpo do pedido e da resposta | talvez, pelo mesmo motivo |
+| `internal/partner/client.go` | a fronteira com a parceira, sem proteção nenhuma | **sim** — é onde o circuit breaker nasce |
+| `internal/platform/telemetry.go` | SDK do OTel já inicializado | quase nunca: as suas métricas de negócio são código novo |
+| `internal/platform/config.go` | leitura de variáveis de ambiente | sim, se você acrescentar parâmetros (TTL, limiares) |
+| `cmd/partner-mock/` | as três parceiras — um binário parametrizado | **não**: é restrição do cenário |
+| `cmd/loadgen/` | o gerador de carga | não |
+| `deploy/otel/` · `deploy/prometheus/` | Collector e Prometheus | só se você mudar o destino da telemetria |
+| `docker-compose.yml` · `Makefile` · `Dockerfile` | o ambiente e os comandos | sim, com moderação |
+
+### As três parceiras — a instabilidade é determinística
+
+| Parceira | Porta | Comportamento |
+|---|---|---|
+| `partner-slow` | 9001 | 1500 ms ± 200 ms, sempre. Nunca falha — só é lenta demais para uma agregação em série |
+| `partner-flaky` | 9002 | 150 ms ± 50 ms, com 40% das chamadas devolvendo 503 |
+| `partner-degrading` | 9003 | 120 ms ± 40 ms em repouso; acima de 5 chamadas simultâneas soma 300 ms por chamada extra, até o teto de 6000 ms. Nunca falha: afunda |
+
+A instabilidade **não é sorteada a cada execução**. Ela vem da semente `20260729`, então a sequência
+de falhas da `partner-flaky` é a mesma na sua máquina e na de quem corrige — inclusive a rajada de
+**nove falhas consecutivas nas sequências 49 a 57**, que é o que garante que um circuit breaker de
+fato abre. Isso não é estimativa: está medido em `docs/smoke-test-factibilidade.md` e preso por
+teste em `cmd/partner-mock/feasibility_test.go`.
+
+Toda resposta das parceiras traz os cabeçalhos `X-Partner-Name`, `X-Partner-Seq`,
+`X-Partner-Latency-Ms` e `X-Partner-Inflight`, e `curl -s localhost:9003/config` mostra a
+configuração efetiva de uma delas. Use isso para entender o cenário — mas os valores padrão são
+**restrição, não decisão** (seção 4).
+
+### Reproduza a falha antes de decidir qualquer coisa
+
+```bash
+make reproduce
+```
+
+Um comando: sobe o ambiente, espera ficar saudável e dispara a carga (10 requisições sequenciais de
+baseline, depois 200 com 50 em voo). O relatório sai no terminal.
+
+O roteiro **`docs/roteiro-cenario-de-falha.md`** ensina a ler esse relatório e a achar no Jaeger a
+cascata em série que o explica — três chamadas coladas uma na outra, e um trace com erro em que o
+span da terceira parceira nem chega a existir. Leia antes de escrever código: é o "antes" da sua
+entrega, e a seção 5 exige que ele tenha sido medido por você.
+
+### O que está ausente de propósito
+
+Quatro buracos, e nenhum deles está escondido — todos estão comentados no próprio código:
+
+1. **Sem timeout** — `internal/partner/client.go`: o `http.Client` tem `Timeout` zero. A API espera
+   o tempo que a parceira quiser.
+2. **Agregação em série** — `internal/quotation/service.go`: as parceiras são consultadas uma após a
+   outra, e a latência da cotação é a **soma** das três.
+3. **Tudo ou nada** — a mesma `service.go`: uma parceira falhando aborta a requisição inteira, mesmo
+   que as outras duas já tenham respondido.
+4. **Sem cache e sem instrumentação de negócio** — o Redis sobe e ninguém fala com ele; o SDK do
+   OTel sobe e emite só telemetria genérica (HTTP de entrada, HTTP de saída, runtime do Go).
+
+Isso é o enunciado, não um esquecimento. Não abra issue nem PR no repositório de origem "corrigindo"
+o starter: preencher esses quatro buracos, com justificativa e com prova, **é a sua entrega**.
+
+### Os comandos
+
+| Comando | O que faz |
+|---|---|
+| `make up` · `make down` · `make ps` · `make logs` | ciclo de vida do ambiente (`down` remove os volumes e zera o cenário) |
+| `make reproduce` | sobe tudo e reproduz a degradação de ponta a ponta |
+| `make load ARGS="-concurrency 100"` | roda só a carga, no ambiente já de pé (`ARGS="-h"` lista as opções) |
+| `make smoke` | prova determinística de que um breaker abre com os defaults — não precisa de Docker |
+| `make test` · `make fmt` · `make vet` · `make tidy` | o dia a dia em Go |
+| `make run` · `make build` | rodar ou compilar a API fora do container |
+| `make help` | lista tudo isso |
+
+## 3. Entrega 1 — o SAD
 
 A primeira entrega é um documento: o **Solution Architecture Document** do Prumo Cota depois da sua
 intervenção. Ele descreve o sistema que você vai construir na entrega 2 e, mais que descrever,
@@ -307,7 +451,7 @@ Também não é um documento longo por obrigação. Quantos requisitos, quantos 
 páginas estão reunidos no bloco **Critérios quantitativos**, no fim deste enunciado, e é lá que
 você confere se entregou o suficiente.
 
-## 3. Entrega 2 — o PoC
+## 4. Entrega 2 — o PoC
 
 A segunda entrega é código: a fatia do seu SAD construída sobre o starter e **provada em execução**.
 Ela é pequena de propósito. Não é aqui que você mostra fôlego de desenvolvedor — é aqui que você
@@ -515,7 +659,7 @@ mecanismos, a instrumentação que prova que eles funcionam, e as evidências. S
 sistema mais bonito e nenhum gráfico mostrando o breaker abrir, você entregou a metade que não
 estava sendo pedida.
 
-## 4. Critérios quantitativos e regras de entrega
+## 5. Critérios quantitativos e regras de entrega
 
 Todo número deste desafio está neste bloco. O resto do enunciado diz o que se espera e por quê; aqui
 está **quanto** — para que você saiba quando parou de faltar, e para que dois corretores diferentes
@@ -541,7 +685,7 @@ alvos**. Bater o mínimo em tudo é uma entrega aprovável; não é uma entrega 
 
 **Extensão: de 10 a 20 páginas equivalentes.** Isso é orientação, não regra — ninguém conta páginas
 na correção. Abaixo da faixa é provável que alguma seção tenha ficado sem conteúdo; acima dela,
-releia procurando enchimento, porque nenhum dos três leitores da seção 2 chega à página trinta.
+releia procurando enchimento, porque nenhum dos três leitores da seção 3 chega à página trinta.
 
 ### Entrega 2 — o PoC
 
@@ -551,7 +695,7 @@ releia procurando enchimento, porque nenhum dos três leitores da seção 2 cheg
 | Métricas de negócio, com o nome declarado no README do processo | 3: estado ou transição do breaker, `hit`/`miss` do cache, latência por parceira |
 | Marcações no trace | 2: a requisição curto-circuitada pelo breaker e a resposta servida de cache |
 | Testes determinísticos do comportamento resiliente | 2 (um do breaker abrindo, um do cache ou do fallback), com `make test` verde |
-| Evidências | as 6 linhas da tabela da seção 3, cada uma com o comando ou a consulta que a gerou e a legenda |
+| Evidências | as 6 linhas da tabela da seção 4, cada uma com o comando ou a consulta que a gerou e a legenda |
 
 **Formato dos arquivos de evidência:** relatórios em texto; imagens em PNG ou JPG legíveis em
 tamanho real; export de trace do Jaeger em JSON, que é melhor que screenshot e ocupa menos. Nada de
@@ -585,10 +729,10 @@ Consolidando o que já apareceu ao longo do enunciado — cada um destes decide 
 compensação pelo resto da entrega:
 
 1. **Ficção apresentada como fato.** Arquivo, biblioteca, métrica ou endpoint citado como existente
-   sem existir (regra 1, seção 2). Propor o que ainda não existe é permitido e esperado — desde que
+   sem existir (regra 1, seção 3). Propor o que ainda não existe é permitido e esperado — desde que
    esteja marcado como proposta.
-2. **Chave de cache sem isolamento por corretora** (seção 3).
+2. **Chave de cache sem isolamento por corretora** (seção 4).
 3. **Evidência que não é sua.** "Antes" copiado do roteiro, de outra máquina ou de outro aluno
-   (seção 3).
+   (seção 4).
 4. **Meia entrega.** SAD sem PoC, ou PoC sem SAD. As duas metades são uma coisa só — é exatamente o
    que este desafio existe para exigir.

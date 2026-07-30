@@ -47,6 +47,10 @@ escreve "usaremos circuit breaker" sem nunca ter visto um abrir.
 - **Material das aulas** (decidido em 2026-07-29): o diretório `arquitetura_de_solucao/` é insumo
   de pesquisa e **não faz parte da árvore do starter**. Ele fica fora do que o aluno forka; o que
   o desafio precisa do material entra por referência no enunciado, não por cópia do conteúdo.
+- **README do starter** (decidido em 2026-07-30): não existe um README separado do enunciado. O
+  `docs/enunciado.md` é o `README.md` publicado, e o guia do starter — como subir, como navegar o
+  código e o que está ausente de propósito — é a **seção 2** dele. Dois documentos com instruções de
+  execução sairiam de sincronia no primeiro ajuste do compose.
 
 ## 4. Escopo
 
