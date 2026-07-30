@@ -158,8 +158,9 @@ services:
 
   # Instavel: 40% das chamadas falham com 503. A taxa nao e sorteada a cada execucao — vem da
   # semente, entao a sequencia de falhas e a mesma para todos os alunos. Com estes valores, as
-  # primeiras 200 requisicoes contem uma rajada de 9 falhas consecutivas: e o que garante que um
-  # circuit breaker de fato abre (o risco "mocks instaveis de menos" registrado na spec).
+  # primeiras 200 requisicoes contem uma rajada de 9 falhas consecutivas (sequencias 49 a 57): e o
+  # que garante que um circuit breaker de fato abre. Nao e estimativa — esta medido em
+  # docs/smoke-test-factibilidade.md e preso por teste em cmd/partner-mock/feasibility_test.go.
   partner-flaky:
     <<: *parceira
     container_name: cotacao-partner-flaky

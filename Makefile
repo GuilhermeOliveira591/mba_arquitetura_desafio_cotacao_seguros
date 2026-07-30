@@ -36,6 +36,12 @@ reproduce: ## Sobe o ambiente e reproduz o cenario de falha de ponta a ponta
 load: ## Roda o gerador de carga no ambiente ja de pe (ARGS="-concurrency 80" para variar)
 	$(COMPOSE) run --rm --build loadgen $(ARGS)
 
+# Comprova que os defaults dos mocks permitem que um circuit breaker de fato abra. E deterministico
+# (nao precisa de Docker nem do ambiente de pe): mesma semente, mesma sequencia, mesmo veredito.
+.PHONY: smoke
+smoke: ## Roda o smoke test de factibilidade do desafio
+	$(GO) test ./cmd/partner-mock -run Feasibility -v
+
 ## --- Aplicacao (Go) ---
 
 .PHONY: build
