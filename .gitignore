@@ -24,6 +24,3 @@ vendor/
 .vscode/
 *.swp
 *~
-
-# Ferramentas auxiliares em Node
-node_modules/
