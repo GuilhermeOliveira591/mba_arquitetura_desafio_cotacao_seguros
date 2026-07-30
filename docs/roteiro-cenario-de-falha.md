@@ -31,28 +31,28 @@ Variações:
 
 ## 2. O que o relatório diz
 
-Saída real de uma execução (30/07/2026). **Os seus números vão diferir** — a máquina, o momento em
-que a degradação decola e a sequência de falhas do `partner-flaky` mudam de execução para execução.
-O que precisa se repetir é a *forma*: p95 multiplicado por ~4 entre o baseline e a carga.
+Saída real de uma execução (30/07/2026), com o ambiente recém-subido. **As suas latências vão
+diferir** — elas dependem da máquina. As **contagens de falha**, não: elas vêm da semente do
+`partner-flaky`, e são as mesmas para todo mundo que rodar a partir de um ambiente zerado.
 
 ```
-baseline — 10 requests, 1 in flight, 14:29:14 UTC to 14:29:33 UTC
-  success        4 of 10 (40%)
-  latency        p50 1.87s   p95 1.98s   p99 1.98s   max 1.98s
-  throughput     0.5 req/s in 18.66s
-  failures       HTTP 502 from partner-flaky: 6
+baseline — 10 requests, 1 in flight, 16:17:53 UTC to 16:18:11 UTC
+  success        5 of 10 (50%)
+  latency        p50 1.89s   p95 2.04s   p99 2.04s   max 2.04s
+  throughput     0.5 req/s in 18.79s
+  failures       HTTP 502 from partner-flaky: 5
 
-load — 200 requests, 50 in flight, 14:29:33 UTC to 14:29:58 UTC
-  success        127 of 200 (64%)
-  latency        p50 7.41s   p95 8.02s   p99 8.03s   max 8.07s
-  throughput     7.8 req/s in 25.49s
-  failures       HTTP 502 from partner-flaky: 73
+load — 200 requests, 50 in flight, 16:18:11 UTC to 16:18:36 UTC
+  success        120 of 200 (60%)
+  latency        p50 6.11s   p95 8.01s   p99 8.03s   max 8.05s
+  throughput     8.0 req/s in 24.90s
+  failures       HTTP 502 from partner-flaky: 80
 
 baseline → load
-  p95 latency    1.98s → 8.02s   4.0x
-  max latency    1.98s → 8.07s   4.1x
-  success        40% → 64%
-  throughput     0.5 → 7.8 req/s
+  p95 latency    2.04s → 8.01s   3.9x
+  max latency    2.04s → 8.05s   4.0x
+  success        50% → 60%
+  throughput     0.5 → 8.0 req/s
 ```
 
 Como ler:
@@ -62,10 +62,14 @@ Como ler:
 - **A carga multiplica por 4.** Com 50 requisições em voo, o p95 vai a ~8s. Nenhuma parceira caiu:
   a `partner-degrading` só ficou mais lenta, e a agregação síncrona repassou isso inteiro ao cliente.
 - **A taxa de erro não é a variável de carga.** Os ~40% de falha vêm da `partner-flaky`, que falha na
-  mesma proporção com ou sem carga. Numa amostra de 10 requisições o baseline oscila entre 20% e 60%
-  — não leia "40% → 64%" como se a carga tivesse melhorado alguma coisa. O que a carga muda é a
-  **latência**; o que a `partner-flaky` mostra é que **uma parceira fora do ar derruba a cotação
-  inteira**, porque não há fallback.
+  mesma proporção com ou sem carga. Não leia "50% → 60%" como se a carga tivesse melhorado alguma
+  coisa: são só 10 requisições contra 200, e numa amostra pequena a proporção balança. O que a carga
+  muda é a **latência**; o que a `partner-flaky` mostra é que **uma parceira fora do ar derruba a
+  cotação inteira**, porque não há fallback.
+- **Rodou de novo e os números de falha mudaram?** Então o ambiente não estava zerado. A sequência de
+  falhas é determinística e começa do zero junto com o container: um `make load` em cima de um
+  ambiente já usado continua do meio dela. Para comparar duas execuções, `make down` antes de cada
+  uma.
 - **Throughput sobe, experiência piora.** A plataforma aceita mais requisições por segundo justamente
   porque cada uma fica mais tempo esperando. Vazão não é desempenho.
 
