@@ -15,8 +15,6 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/quotation"
 )
 
-// testConfig is a miniature run: the shape of the load is what is under test here, never the
-// calibrated volume of the real scenario.
 func testConfig(target string) Config {
 	return Config{
 		Target: target, Tenant: "corretora-a",
@@ -34,8 +32,6 @@ func testCaller(t *testing.T, cfg Config) *caller {
 	return newCaller(cfg, bodies)
 }
 
-// quotationAPI is a stand-in for the real API: it answers the aggregated quote after `latency` and
-// reports the highest number of requests it saw at the same time.
 type quotationAPI struct {
 	*httptest.Server
 	peak     atomic.Int64
@@ -127,8 +123,6 @@ func TestFailureKeepsItsLatencyAndBlamesThePartner(t *testing.T) {
 		if result.Partner != "partner-flaky" {
 			t.Errorf("partner %q, expected the one the API blamed", result.Partner)
 		}
-		// The time of a failure is the expensive part of this scenario: the 502 only shows up after
-		// the serial aggregation has already burned through the partners that answered.
 		if result.Latency < 20*time.Millisecond {
 			t.Errorf("latency %s, expected the time waited until the failure", result.Latency)
 		}
@@ -156,14 +150,12 @@ func TestRequestBeyondTheTimeoutIsAFailureOfTheRun(t *testing.T) {
 	}
 }
 
-// The end of the run is the load generator giving up, not the platform failing. Counting the
-// requests cut short by -duration (or by Ctrl-C) would invent an error rate that nobody produced.
 func TestRequestsCutShortByTheEndOfTheRunAreNotCounted(t *testing.T) {
 	api := newQuotationAPI(time.Second, quoteOK)
 	defer api.Close()
 
 	cfg := testConfig(api.URL)
-	cfg.Timeout = 0 // waits forever, like the starter's API does with its partners
+	cfg.Timeout = 0
 	ctx, expire := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer expire()
 
@@ -175,7 +167,6 @@ func TestRequestsCutShortByTheEndOfTheRunAreNotCounted(t *testing.T) {
 	if phase.Planned != 100 {
 		t.Errorf("planned %d, expected the phase to remember what it set out to send", phase.Planned)
 	}
-	// The phase does not go on sending after the deadline: what is missing does not get sent.
 	if served := api.served.Load(); served > 8 {
 		t.Errorf("%d requests sent after the end of the run", served)
 	}
@@ -213,8 +204,6 @@ func TestEveryRequestIdentifiesTheBrokerAndRotatesTheQuotes(t *testing.T) {
 	}
 }
 
-// The generated quote has to pass through the API's own validation — otherwise the run would
-// measure a wall of 400s and call it a scenario.
 func TestGeneratedQuoteIsAValidRequest(t *testing.T) {
 	bodies, err := quoteBodies(5)
 	if err != nil {
@@ -224,7 +213,7 @@ func TestGeneratedQuoteIsAValidRequest(t *testing.T) {
 	for _, body := range bodies {
 		var request quotation.Request
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields() // the same the API's handler uses
+		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
 			t.Fatalf("body %s is not a quotation.Request: %v", body, err)
 		}

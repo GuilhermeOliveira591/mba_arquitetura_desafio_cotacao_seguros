@@ -9,13 +9,10 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/platform"
 )
 
-// TenantHeader identifies the broker asking for the quote.
 const TenantHeader = "X-Tenant-Id"
 
-// requestLimit cuts off absurd bodies before they turn into memory.
-const requestLimit = 1 << 20 // 1 MiB
+const requestLimit = 1 << 20
 
-// API exposes the HTTP contract of the quotation-api.
 type API struct {
 	service *Service
 	tenants map[string]bool
@@ -29,10 +26,6 @@ func NewAPI(service *Service, tenants []string) *API {
 	return &API{service: service, tenants: known}
 }
 
-// Routes builds the API router.
-//
-//	POST /quotes   aggregated quote from the partners (requires X-Tenant-Id)
-//	GET  /healthz  process health
 func (a *API) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /quotes", a.quote)
@@ -48,8 +41,7 @@ func (a *API) quote(w http.ResponseWriter, r *http.Request) {
 		platform.WriteError(w, http.StatusBadRequest, TenantHeader+" is required")
 		return
 	}
-	// An unknown broker is not "unauthenticated", it is "not yours". Isolation between brokers is a
-	// requirement of the scenario (SUSEP and LGPD), not an implementation detail.
+
 	if !a.tenants[tenant] {
 		platform.WriteError(w, http.StatusForbidden, "broker not enabled on this platform")
 		return
@@ -77,12 +69,6 @@ func (a *API) quote(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, response)
 }
 
-// respondPartnerFailure translates the failure of the external dependency into a 502 — and says
-// whose fault it was.
-//
-// A single partner being down brings down the entire request. That is the deliberately naive
-// behavior: with no circuit breaker, no fallback and no cache, the availability of the platform is
-// the product of the availability of the three partners.
 func (a *API) respondPartnerFailure(w http.ResponseWriter, err error) {
 	var failure *partner.Error
 	if errors.As(err, &failure) {

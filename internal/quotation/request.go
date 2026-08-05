@@ -1,4 +1,3 @@
-// Package quotation holds the quoting rules and the HTTP contract of the quotation-api.
 package quotation
 
 import (
@@ -8,8 +7,6 @@ import (
 	"github.com/GuilhermeOliveira591/mba_arquitetura_desafio_cotacao_seguros/internal/partner"
 )
 
-// Request is the body of POST /quotes: the risk to be quoted. The broker does NOT show up here — it
-// comes in the X-Tenant-Id header, because the tenant is call context, not insurance data.
 type Request struct {
 	Driver   Driver  `json:"driver"`
 	Vehicle  Vehicle `json:"vehicle"`
@@ -28,14 +25,10 @@ type Vehicle struct {
 	ValueCents int64  `json:"value_cents"`
 }
 
-// accepted coverages. Two are enough: the starter is a working skeleton, not a product.
 var coverages = map[string]bool{"comprehensive": true, "third_party": true}
 
 const defaultCoverage = "comprehensive"
 
-// Normalize fills in whatever has a default and validates the rest. The validation is deliberately
-// short — the challenge is not about insurance business rules, it is about what happens when a
-// partner fails.
 func (r *Request) Normalize() error {
 	r.Coverage = strings.TrimSpace(r.Coverage)
 	if r.Coverage == "" {
@@ -63,16 +56,11 @@ func (r *Request) Normalize() error {
 	return nil
 }
 
-// partnerRequest is what the partner receives. The broker goes in the body because, in the challenge
-// scenario, each broker has its own commercial terms: the same plate quoted by two brokers is worth
-// different premiums. That is what makes per-tenant isolation a requirement rather than mere care —
-// including in the cache key the student is going to build.
 type partnerRequest struct {
 	Broker string `json:"broker"`
 	Request
 }
 
-// Response is the success body of POST /quotes.
 type Response struct {
 	TenantID  string          `json:"tenant_id"`
 	Quotes    []partner.Quote `json:"quotes"`

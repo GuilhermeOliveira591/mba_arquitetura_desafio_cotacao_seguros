@@ -48,8 +48,6 @@ func TestQuotesReturnsAggregatedQuotes(t *testing.T) {
 	}
 }
 
-// TestQuotesRejectsRequestWithoutTenant is the acceptance criterion of the issue: no broker, no
-// quote.
 func TestQuotesRejectsRequestWithoutTenant(t *testing.T) {
 	quoter := &fakeQuoter{premiums: defaultPremiums()}
 	response := postQuotes(testAPI(quoter), "", validBody)
@@ -94,8 +92,6 @@ func TestQuotesRejectsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestQuotesResponds502WithTheNameOfThePartnerThatWentDown documents the naive behavior: there is no
-// partial response, and the API says whose fault it was.
 func TestQuotesResponds502WithTheNameOfThePartnerThatWentDown(t *testing.T) {
 	quoter := &fakeQuoter{premiums: defaultPremiums(), failOn: "partner-flaky"}
 	response := postQuotes(testAPI(quoter), "corretora-a", validBody)

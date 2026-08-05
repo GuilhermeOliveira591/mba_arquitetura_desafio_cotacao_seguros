@@ -1,15 +1,3 @@
-// Command partner-mock is the starter's fake partner insurer — the unstable external dependency
-// against which the student is going to build circuit breaker, cache and fallback.
-//
-// It is a single binary for the three profiles of the challenge. What changes between
-// `partner-slow`, `partner-flaky` and `partner-degrading` is configuration, not code: the
-// misbehavior lives in docker-compose.yml, in a single readable place, and the starter stays small.
-//
-// Contract:
-//
-//	POST /quotes   partner quote (applies the profile's latency, failure and degradation)
-//	GET  /healthz  process health — never degrades, never fails
-//	GET  /config   effective configuration of the profile that is running
 package main
 
 import (
@@ -26,10 +14,7 @@ import (
 	"time"
 )
 
-// requestLimit cuts off absurd requests before they turn into memory. The mock does not validate
-// the content of the request on purpose: taking care of tenant and payload is the quotation-api's
-// job, not the partner's.
-const requestLimit = 1 << 20 // 1 MiB
+const requestLimit = 1 << 20
 
 func main() {
 	cfg, err := loadConfig(os.Getenv)
@@ -71,9 +56,6 @@ func routes(cfg Config, behavior *Behavior) http.Handler {
 	return mux
 }
 
-// quoteHandler is the only endpoint that suffers the profile: it applies the latency decided on
-// arrival and only then responds — success or failure. Failing after waiting is the truly bad case,
-// the one that eats up the client's timeout; an instant failure would be far too easy to tolerate.
 func quoteHandler(cfg Config, behavior *Behavior) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		decision := behavior.Admit()
@@ -89,8 +71,6 @@ func quoteHandler(cfg Config, behavior *Behavior) http.HandlerFunc {
 		}
 
 		if err := sleep(r.Context(), decision.Latency); err != nil {
-			// The client gave up (timeout or cancellation) before the partner answered. There is
-			// nobody left to write to: just release the slot through the defer.
 			return
 		}
 
@@ -106,9 +86,6 @@ func quoteHandler(cfg Config, behavior *Behavior) http.HandlerFunc {
 	}
 }
 
-// healthHandler always answers, right away. The compose healthcheck must not see the profile's
-// misbehavior, otherwise the slow partner would never come up "healthy" and the environment would
-// never stand up.
 func healthHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "partner": cfg.Name})
@@ -126,9 +103,6 @@ type jsonError struct {
 	Partner string `json:"partner"`
 }
 
-// respond attaches the mock's decision to the response headers. It is the starter's diagnostic
-// shortcut: you can see the sequence number, the applied latency and the load of the moment without
-// opening Jaeger — useful precisely before the student instruments anything.
 func respond(w http.ResponseWriter, cfg Config, decision Decision, status int, body any) {
 	header := w.Header()
 	header.Set("X-Partner-Name", cfg.Name)
@@ -146,8 +120,6 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// sleep waits while respecting the client's cancellation — without it, a slow partner would hold on
-// to goroutines of requests that are already gone.
 func sleep(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return nil

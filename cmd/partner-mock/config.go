@@ -7,31 +7,22 @@ import (
 	"time"
 )
 
-// Config is the partner's bad behavior expressed as data. A single binary serves the three profiles
-// of the challenge (`partner-slow`, `partner-flaky`, `partner-degrading`) because nothing here is
-// decided in code: everything comes in through environment variables, and the profiles live in
-// docker-compose.yml.
 type Config struct {
-	Name          string        // PARTNER_NAME
-	Port          string        // PORT
-	Seed          uint64        // PARTNER_SEED — governs all of the mock's apparent randomness
-	Latency       time.Duration // PARTNER_LATENCY_MS
-	Jitter        time.Duration // PARTNER_JITTER_MS
-	FailureRate   float64       // PARTNER_FAILURE_RATE (0 to 1)
-	FailureStatus int           // PARTNER_FAILURE_STATUS
-	DegradeAfter  int64         // PARTNER_DEGRADE_AFTER — in-flight requests tolerated without degrading (0 turns it off)
-	DegradeStep   time.Duration // PARTNER_DEGRADE_STEP_MS — extra latency per in-flight request above the threshold
-	DegradeCap    time.Duration // PARTNER_DEGRADE_CAP_MS — degradation cap (0 = no cap)
-	QuoteTTL      time.Duration // PARTNER_QUOTE_TTL_SECONDS — how long the quote is valid
+	Name          string
+	Port          string
+	Seed          uint64
+	Latency       time.Duration
+	Jitter        time.Duration
+	FailureRate   float64
+	FailureStatus int
+	DegradeAfter  int64
+	DegradeStep   time.Duration
+	DegradeCap    time.Duration
+	QuoteTTL      time.Duration
 }
 
-// environment is the reading of environment variables as a dependency, so that the tests do not
-// have to touch the process.
 type environment func(string) string
 
-// loadConfig assembles the Config from the environment. An invalid value is an error, never
-// silently replaced by the default: in a didactic starter, a typo in `PARTNER_FAILURE_RATE` that
-// turns into 0 makes the student hunt for hours for a circuit breaker that never opens.
 func loadConfig(env environment) (Config, error) {
 	cfg := Config{
 		Name: env.text("PARTNER_NAME", "partner"),
@@ -97,8 +88,6 @@ func (c Config) validate() error {
 	return nil
 }
 
-// Summary describes the active profile in a single line, so the startup log makes it obvious which
-// of the three partners is up.
 func (c Config) Summary() string {
 	summary := fmt.Sprintf("latency=%s jitter=%s failure=%.0f%%", c.Latency, c.Jitter, c.FailureRate*100)
 	if c.DegradeAfter > 0 {
@@ -107,9 +96,6 @@ func (c Config) Summary() string {
 	return summary + fmt.Sprintf(" seed=%d", c.Seed)
 }
 
-// MarshalJSON exposes the effective configuration on `GET /config`, with the durations in
-// milliseconds — it is what the student reads to check which parameters the partner is running
-// with.
 func (c Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Name          string  `json:"partner"`

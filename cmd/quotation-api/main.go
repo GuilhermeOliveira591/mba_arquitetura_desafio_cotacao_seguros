@@ -1,14 +1,3 @@
-// Command quotation-api is the multi-tenant insurance quotation API of the starter.
-//
-// It takes a quote request from a broker and calls the partner insurers, aggregating the responses.
-// It works — and it works badly on purpose: the partners are called serially, with no timeout, no
-// circuit breaker, no cache and no fallback. That emptiness is the challenge statement, not an
-// oversight; see internal/quotation/service.go and internal/partner/client.go.
-//
-// Contract:
-//
-//	POST /quotes   aggregated quote from the partners (requires the X-Tenant-Id header)
-//	GET  /healthz  health of the process
 package main
 
 import (
@@ -35,9 +24,6 @@ func main() {
 	ctx, stopListening := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopListening()
 
-	// The OpenTelemetry SDK is booted here, before anything else, so that everything the process
-	// does afterwards is already traced. The student does not write a single line to see the
-	// request in Jaeger — see internal/platform/telemetry.go.
 	stopTelemetry, err := platform.StartTelemetry(context.Background(), cfg.Telemetry)
 	if err != nil {
 		log.Fatalf("telemetry: %v", err)
@@ -62,8 +48,6 @@ func main() {
 		if err := server.Shutdown(shutdown); err != nil {
 			log.Printf("quotation-api: forced shutdown: %v", err)
 		}
-		// Flushing after the server is down is what keeps the spans of the last requests — the
-		// interesting ones, when something is on fire — from dying with the process.
 		if err := stopTelemetry(shutdown); err != nil {
 			log.Printf("quotation-api: telemetry shutdown: %v", err)
 		}

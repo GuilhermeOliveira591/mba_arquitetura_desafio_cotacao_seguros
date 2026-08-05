@@ -22,9 +22,7 @@ func TestDefaultsReproduceTheScenarioWithNoArguments(t *testing.T) {
 	if cfg.Tenant != defaultTenant {
 		t.Errorf("tenant %q, expected %q", cfg.Tenant, defaultTenant)
 	}
-	// The whole point of the command is `loadgen` with no arguments degrading the platform. If the
-	// default concurrency ever drops below the measured knee (25 to 30 in-flight requests), the run
-	// stops proving anything — see the calibration note in config.go.
+
 	if cfg.Concurrency < 40 {
 		t.Errorf("default concurrency %d is below the calibrated load", cfg.Concurrency)
 	}
@@ -47,8 +45,7 @@ func TestEnvironmentPointsTheRunAndFlagsWin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig: %v", err)
 	}
-	// The trailing slash comes from the environment variable being written by hand in the compose
-	// file; without trimming it the endpoint would be `.../quotes` with a double slash.
+
 	if cfg.Endpoint() != "http://quotation-api:8080/quotes" {
 		t.Errorf("endpoint %q, expected the address from the environment with no double slash", cfg.Endpoint())
 	}

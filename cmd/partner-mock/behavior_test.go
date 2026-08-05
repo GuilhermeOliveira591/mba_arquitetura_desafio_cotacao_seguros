@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// flakyProfile reproduces the `partner-flaky` from docker-compose.yml. The tests in this file are
-// the defense against the risk recorded in the spec ("unstable mocks being too unstable — or not
-// unstable enough"): if someone touches the defaults and breaks reproducibility or the failure
-// bursts, it breaks here.
 func flakyProfile() Config {
 	return Config{
 		Name:          "partner-flaky",
@@ -73,9 +69,6 @@ func TestObservedFailureRateStaysCloseToTheConfiguredOne(t *testing.T) {
 	}
 }
 
-// TestFlakyProfileProducesBursts makes sure the student's circuit breaker has a way to open. A mock
-// that alternated success and failure in a regular fashion would never trip a breaker that counts
-// consecutive failures — and the whole exercise of the challenge would die at the default.
 func TestFlakyProfileProducesBursts(t *testing.T) {
 	const window = 200
 	const minimumBurst = 4
@@ -154,8 +147,8 @@ func TestDegradationOnlyStartsAboveTheThreshold(t *testing.T) {
 		{5, 0},
 		{6, 300 * time.Millisecond},
 		{10, 1500 * time.Millisecond},
-		{25, 6 * time.Second},  // cap
-		{100, 6 * time.Second}, // the cap holds
+		{25, 6 * time.Second},
+		{100, 6 * time.Second},
 	}
 
 	for _, tc := range cases {
@@ -218,9 +211,6 @@ func TestQuoteIsStablePerRequest(t *testing.T) {
 	}
 }
 
-// TestDifferentPartnersQuoteDifferently makes sure the quotation-api's aggregation has something to
-// compare: three partners returning the same premium for the same request would empty the scenario
-// out.
 func TestDifferentPartnersQuoteDifferently(t *testing.T) {
 	request := []byte(`{"tenant_id":"broker-a"}`)
 	premiums := map[int64]string{}

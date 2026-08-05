@@ -36,8 +36,6 @@ func TestSummaryCountsSuccessesAndTimesEveryRequest(t *testing.T) {
 	if summary.SuccessRate() != 75 {
 		t.Errorf("success rate %.0f%%, expected 75%%", summary.SuccessRate())
 	}
-	// The failed request weighs on the distribution like any other: it is the slowest of the four
-	// and it is the one that has to show up as the maximum.
 	if summary.Max != 4*time.Second || summary.P50 != 2*time.Second {
 		t.Errorf("max %s and p50 %s, expected 4s and 2s", summary.Max, summary.P50)
 	}
@@ -72,8 +70,6 @@ func TestFailuresAreGroupedByCauseAndOrderedByWeight(t *testing.T) {
 	}
 }
 
-// Nearest rank: every percentile in the report is a latency that actually happened, so that each
-// one has a trace behind it in Jaeger.
 func TestPercentileNeverInterpolates(t *testing.T) {
 	sorted := make([]time.Duration, 0, 10)
 	for i := 1; i <= 10; i++ {
@@ -109,7 +105,7 @@ func TestReportPutsBaselineAndLoadSideBySide(t *testing.T) {
 		"baseline — 2 requests, 1 in flight",
 		"load — 2 requests, 50 in flight",
 		"HTTP 502 from partner-flaky: 1",
-		"p95 latency    2.00s → 8.00s   4.0x", // the sentence the student takes to the document
+		"p95 latency    2.00s → 8.00s   4.0x",
 		"success        100% → 50%",
 		"http://localhost:16686",
 		"docs/roteiro-cenario-de-falha.md",
@@ -131,8 +127,6 @@ func TestReportWithoutBaselineDoesNotCompare(t *testing.T) {
 	}
 }
 
-// A run where nothing was answered says nothing about the scenario — it says the environment is
-// not up, and the command has to fail so that whoever ran it does not read zeros as a result.
 func TestUnreachableEnvironmentIsNotAResult(t *testing.T) {
 	refused := phaseOf("load", 4, time.Second,
 		Result{Failure: "connection refused"}, Result{Failure: "connection refused"}, Result{Failure: "timeout"})

@@ -29,7 +29,6 @@ func validRequest() Request {
 	return r
 }
 
-// fakeQuoter stands in for the partners in the tests and records how it was called.
 type fakeQuoter struct {
 	delay      time.Duration
 	premiums   map[string]int64
@@ -70,7 +69,7 @@ func TestQuoteAggregatesTheThreePartnersSortedByPremium(t *testing.T) {
 	if len(response.Quotes) != 3 {
 		t.Fatalf("%d quotes, expected 3", len(response.Quotes))
 	}
-	expected := []string{"partner-flaky", "partner-degrading", "partner-slow"} // from cheapest to most expensive
+	expected := []string{"partner-flaky", "partner-degrading", "partner-slow"}
 	for i, name := range expected {
 		if response.Quotes[i].Partner != name {
 			t.Errorf("quote %d is from %q, expected from %q", i, response.Quotes[i].Partner, name)
@@ -81,9 +80,6 @@ func TestQuoteAggregatesTheThreePartnersSortedByPremium(t *testing.T) {
 	}
 }
 
-// TestQuoteCallsThePartnersSerially locks in the deliberate naivety of the starter: if someone
-// parallelizes the calls, the degradation scenario of the challenge stops showing up and this test
-// breaks.
 func TestQuoteCallsThePartnersSerially(t *testing.T) {
 	quoter := &fakeQuoter{delay: 40 * time.Millisecond, premiums: defaultPremiums()}
 
@@ -101,8 +97,6 @@ func TestQuoteCallsThePartnersSerially(t *testing.T) {
 	}
 }
 
-// TestOnePartnerDownBringsDownTheWholeRequest is the other deliberate gap: with no fallback, the
-// partial response does not exist.
 func TestOnePartnerDownBringsDownTheWholeRequest(t *testing.T) {
 	quoter := &fakeQuoter{premiums: defaultPremiums(), failOn: "partner-flaky"}
 
@@ -115,14 +109,12 @@ func TestOnePartnerDownBringsDownTheWholeRequest(t *testing.T) {
 	if !errors.As(err, &failure) || failure.Partner != "partner-flaky" {
 		t.Fatalf("error %v does not identify the partner that failed", err)
 	}
-	// The next partner is never even called: the failure interrupts the series.
+
 	if last := quoter.calls[len(quoter.calls)-1]; last != "partner-flaky" {
 		t.Errorf("last partner called was %q, expected partner-flaky", last)
 	}
 }
 
-// TestBrokerGoesInThePartnerRequest makes sure the same plate quoted by different brokers produces
-// different requests — which makes a per-tenant cache key a real requirement in the PoC.
 func TestBrokerGoesInThePartnerRequest(t *testing.T) {
 	quoter := &fakeQuoter{premiums: defaultPremiums()}
 	service := NewService(threePartners[:1], quoter)

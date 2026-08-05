@@ -49,7 +49,6 @@ func TestQuoteReadsThePartnerResponse(t *testing.T) {
 	if quote.PremiumCents != 123456 || quote.QuoteID != "q-1" {
 		t.Errorf("quote read incorrectly: %+v", quote)
 	}
-	// The name comes from the configuration, not from whatever the partner says about itself.
 	if quote.Partner != "partner-flaky" {
 		t.Errorf("partner %q, want partner-flaky", quote.Partner)
 	}
@@ -86,9 +85,6 @@ func TestQuoteFailsOnUnreadableResponse(t *testing.T) {
 	}
 }
 
-// TestQuoteHonoursCancellation shows that the only protection in place today is the one coming from
-// the caller: there is no timeout of its own in the client — and that is the deliberate emptiness of
-// the starter.
 func TestQuoteHonoursCancellation(t *testing.T) {
 	p, closeServer := testPartner(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()

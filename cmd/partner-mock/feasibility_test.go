@@ -1,42 +1,20 @@
 package main
 
-// Feasibility smoke test: proof that the challenge is buildable on top of these defaults.
-//
-// The risk this file defends against is the one recorded in the spec: a `partner-flaky` unstable
-// enough to look broken, but not unstable enough for a circuit breaker to ever open. If that were
-// the case the student would spend hours on a breaker that stays closed forever and would conclude,
-// correctly, that the exercise is broken.
-//
-// So the assertion here is not about this file's breaker — that one is only a measuring instrument,
-// a throwaway model of what the student is asked to build. What is under test is the *mock's default
-// parameters*: whether the failure sequence they produce gives a breaker a reason to open, and later
-// a reason to close again, inside a single `make reproduce`.
-//
-// Everything below is deterministic — same seed, same sequence, same verdict on every machine. The
-// empirical half of the smoke test (the platform visibly degrading under load) lives in
-// docs/smoke-test-factibilidade.md, because it needs the environment up.
-
 import (
 	"fmt"
 	"testing"
 )
 
-// requestsPerRun is what one `make reproduce` sends: 10 sequential baseline requests plus 200 under
-// load. Since the aggregation is serial and `partner-slow` never fails, every one of them reaches
-// `partner-flaky` — so this is also the number of partner calls a student sees on their first run.
 const requestsPerRun = 210
 
-// breakerPolicy is a trip rule, in the two shapes libraries actually ship: counting consecutive
-// failures, or measuring the failure ratio over a rolling window. The names are the ones a student
-// would recognize from gobreaker, resilience4j or Polly.
 type breakerPolicy struct {
 	name             string
-	consecutive      int     // opens after this many consecutive failures (0 disables the rule)
-	window           int     // opens when the failure ratio over the last `window` calls reaches `ratio` (0 disables)
-	ratio            float64 // failure ratio that trips the window rule
-	cooldown         int     // requests rejected while open, before the breaker probes again
-	successesToClose int     // probe successes in a row that close the circuit
-	opensWithin      int     // the assertion: it has to open no later than this request
+	consecutive      int
+	window           int
+	ratio            float64
+	cooldown         int
+	successesToClose int
+	opensWithin      int
 }
 
 func (p breakerPolicy) trips(consecutiveFailures int, recent []bool) bool {
@@ -66,18 +44,13 @@ const (
 )
 
 type breakerOutcome struct {
-	openedAt       int // client request on which the circuit opened for the first time (0 = never opened)
-	callsUntilOpen int // partner calls spent until then
+	openedAt       int
+	callsUntilOpen int
 	opens          int
-	recoveries     int // times the circuit went back to closed after being open
-	shortCircuited int // requests the breaker answered without touching the partner
+	recoveries     int
+	shortCircuited int
 }
 
-// simulate runs `requests` client requests through the policy against the real Behavior of the mock.
-//
-// The detail that makes this faithful: while the circuit is open the partner is *not called*, and so
-// its sequence number does not advance. A simulation reading the failure sequence straight through
-// would credit the breaker with failures it never saw.
 func simulate(cfg Config, p breakerPolicy, requests int) breakerOutcome {
 	behavior := NewBehavior(cfg)
 	state := closed
@@ -143,9 +116,6 @@ func (o breakerOutcome) String() string {
 		o.openedAt, o.callsUntilOpen, o.opens, o.recoveries, o.shortCircuited)
 }
 
-// policies are the trip rules the challenge has to survive. The `opensWithin` values are measured,
-// not guessed: they are the current behavior of the defaults, and locking them here is what turns a
-// silent regression (someone tuning PARTNER_SEED or PARTNER_FAILURE_RATE) into a failing test.
 func policies() []breakerPolicy {
 	return []breakerPolicy{
 		{name: "3 consecutive failures", consecutive: 3, cooldown: 5, successesToClose: 2, opensWithin: 10},
@@ -155,9 +125,6 @@ func policies() []breakerPolicy {
 	}
 }
 
-// TestFeasibilityBreakersOpenOnTheDefaultProfile is the acceptance criterion of the smoke test: with
-// the parameters that ship in docker-compose.yml, a circuit breaker does open — and it opens early
-// enough that the student sees it on the first run, not after a night of load.
 func TestFeasibilityBreakersOpenOnTheDefaultProfile(t *testing.T) {
 	for _, policy := range policies() {
 		t.Run(policy.name, func(t *testing.T) {
@@ -174,11 +141,6 @@ func TestFeasibilityBreakersOpenOnTheDefaultProfile(t *testing.T) {
 	}
 }
 
-// TestFeasibilityBreakersCloseAgain guards the other end of the exercise. A partner that failed
-// forever would be just as useless as one that never failed: the deliverable asks for a breaker with
-// *three* states, and half-open only means something if there are successes on the other side of the
-// cooldown. Here the circuit has to come back to closed on its own, without anyone fixing the
-// partner.
 func TestFeasibilityBreakersCloseAgain(t *testing.T) {
 	for _, policy := range policies() {
 		t.Run(policy.name, func(t *testing.T) {
@@ -191,11 +153,6 @@ func TestFeasibilityBreakersCloseAgain(t *testing.T) {
 	}
 }
 
-// TestFeasibilityBurstIsWhereTheDocsSayItIs pins the number cited in docker-compose.yml and in the
-// smoke test document: the burst of 9 consecutive failures at sequence 49-57 is *the* reason any
-// consecutive-failure breaker opens on the first run. If a change to the seed or to the failure rate
-// moves this burst, the defaults may still be fine — but the docs are not, and the smoke test has to
-// be run again.
 func TestFeasibilityBurstIsWhereTheDocsSayItIs(t *testing.T) {
 	const (
 		wantLongest = 9

@@ -83,9 +83,6 @@ func TestQuoteAppliesTheProfileLatency(t *testing.T) {
 	}
 }
 
-// TestQuoteGivesUpWhenTheClientGivesUp protects the behavior the student is going to exercise with
-// timeout and circuit breaker: the slow partner must not hold on to the goroutine of a request that
-// has already been abandoned.
 func TestQuoteGivesUpWhenTheClientGivesUp(t *testing.T) {
 	cfg := flakyProfile()
 	cfg.Latency, cfg.Jitter, cfg.FailureRate = 5*time.Second, 0, 0
@@ -106,8 +103,6 @@ func TestQuoteGivesUpWhenTheClientGivesUp(t *testing.T) {
 	}
 }
 
-// TestHealthzIgnoresTheProfile is what keeps `docker compose up` viable: a partner with 5s of
-// latency and 100% failure still has to come up healthy.
 func TestHealthzIgnoresTheProfile(t *testing.T) {
 	cfg := flakyProfile()
 	cfg.Latency, cfg.FailureRate = 5*time.Second, 1

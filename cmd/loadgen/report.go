@@ -7,13 +7,12 @@ import (
 	"time"
 )
 
-// Summary condenses a phase into the numbers that go in the report.
 type Summary struct {
-	Requests   int // requests that got an answer (or failed on their own merits)
-	Planned    int // requests the phase intended to send
+	Requests   int
+	Planned    int
 	OK         int
 	Elapsed    time.Duration
-	Throughput float64 // answers per second
+	Throughput float64
 	P50        time.Duration
 	P95        time.Duration
 	P99        time.Duration
@@ -21,14 +20,11 @@ type Summary struct {
 	Causes     []Cause
 }
 
-// Cause is a failure mode and how many times it happened. It is grouped, and not listed request by
-// request, because the diagnosis the student needs is "who is failing", not "which call failed".
 type Cause struct {
 	Label string
 	Count int
 }
 
-// SuccessRate is the share of requests the platform answered with the aggregated quote, in percent.
 func (s Summary) SuccessRate() float64 {
 	if s.Requests == 0 {
 		return 0
@@ -87,30 +83,23 @@ func cause(result Result) string {
 	}
 }
 
-// percentile uses the nearest-rank method: it always returns a latency that actually happened,
-// never an interpolation between two requests. In a report meant to be read alongside the traces in
-// Jaeger, every number here has to have a trace behind it.
 func percentile(sorted []time.Duration, p int) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	rank := (p*len(sorted) + 99) / 100 // ceil(p% of n)
+	rank := (p*len(sorted) + 99) / 100
 	if rank < 1 {
 		rank = 1
 	}
 	return sorted[rank-1]
 }
 
-// Report is the whole run, ready to be read.
 type Report struct {
 	Config   Config
-	Baseline *Phase // nil when the baseline was skipped with -baseline 0
+	Baseline *Phase
 	Load     Phase
 }
 
-// Write prints the report. It is plain text on purpose: the output of this command is meant to be
-// pasted into the student's document as evidence of the "before", next to the screenshot of the
-// trace.
 func (r Report) Write(w io.Writer) {
 	fmt.Fprintf(w, "\nloadgen · %s · tenant %s · %d distinct quotes\n",
 		r.Config.Endpoint(), r.Config.Tenant, r.Config.Distinct)
@@ -156,9 +145,6 @@ func writePhase(w io.Writer, phase Phase, summary Summary) {
 	}
 }
 
-// writeComparison is the point of the whole command: two numbers side by side. "The platform is
-// slow" is an opinion; "p95 went from 1.8s to 9.4s while the load went up" is a measurement — and it
-// is the sentence the student needs before deciding what to build.
 func writeComparison(w io.Writer, baseline, load Summary) {
 	fmt.Fprintf(w, "\nbaseline → load\n")
 	fmt.Fprintf(w, "  %-14s %s → %s%s\n", "p95 latency", short(baseline.P95), short(load.P95), times(baseline.P95, load.P95))
@@ -167,8 +153,6 @@ func writeComparison(w io.Writer, baseline, load Summary) {
 	fmt.Fprintf(w, "  %-14s %.1f → %.1f req/s\n", "throughput", baseline.Throughput, load.Throughput)
 }
 
-// writeEvidence closes with where to go look. The numbers say the platform degraded; only the trace
-// says why — and the student who does not know where to click stops at the number.
 func writeEvidence(w io.Writer, load Phase) {
 	fmt.Fprintf(w, "\nwhere to look\n")
 	fmt.Fprintf(w, "  %-14s http://localhost:16686 · service quotation-api · operation POST /quotes\n", "Jaeger")
@@ -176,8 +160,6 @@ func writeEvidence(w io.Writer, load Phase) {
 	fmt.Fprintf(w, "  %-14s docs/roteiro-cenario-de-falha.md\n\n", "step by step")
 }
 
-// times expresses the degradation as a multiplier — the form that survives being read out loud in
-// the defense of the document.
 func times(before, after time.Duration) string {
 	if before <= 0 {
 		return ""
@@ -185,13 +167,8 @@ func times(before, after time.Duration) string {
 	return fmt.Sprintf("   %.1fx", float64(after)/float64(before))
 }
 
-// clock carries the time zone because loadgen usually runs inside the compose container, whose
-// clock is UTC, while Jaeger's UI shows the browser's local time. Without the suffix the student
-// looks for the load in the wrong hour of the day.
 func clock(t time.Time) string { return t.Format("15:04:05 MST") }
 
-// short prints durations the way a report is read: milliseconds while they are milliseconds,
-// seconds with two digits after that. time.Duration's own format would print "1.783458212s".
 func short(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%dms", d.Milliseconds())
@@ -199,9 +176,6 @@ func short(d time.Duration) string {
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
-// unreachable reports whether not a single request got an answer from the platform, along with the
-// most frequent reason. Such a run says nothing about the scenario — it says the environment is not
-// up — and it is worth more as one line of diagnosis than as a report full of zeros.
 func unreachable(phases ...*Phase) (string, bool) {
 	counted := map[string]int{}
 	for _, phase := range phases {

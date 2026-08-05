@@ -53,8 +53,6 @@ func TestConfigReadsPartnersAndTenantsFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// TestTelemetryIsOnByDefault pins the decision that the student does not have to switch
-// observability on: it is already running when the environment comes up.
 func TestTelemetryIsOnByDefault(t *testing.T) {
 	cfg, err := LoadConfig(env(nil))
 	if err != nil {
@@ -93,8 +91,6 @@ func TestTelemetryCanBeTurnedOff(t *testing.T) {
 	}
 }
 
-// TestTelemetryOffSkipsEndpointValidation keeps a broken endpoint from stopping an API that is not
-// going to export anything anyway.
 func TestTelemetryOffSkipsEndpointValidation(t *testing.T) {
 	if _, err := LoadConfig(env(map[string]string{
 		"OTEL_SDK_DISABLED":           "true",
