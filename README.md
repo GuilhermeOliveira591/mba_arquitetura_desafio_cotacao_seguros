@@ -1,13 +1,8 @@
 # Desafio: Fundamentos de Arquitetura de Solução
 
-Uma plataforma de cotação de seguro auto que **funciona mal**: consulta três seguradoras
-parceiras em série, espera o tempo que elas quiserem e devolve erro inteiro quando qualquer uma
-falha. Tudo o que é preciso para reproduzir essa degradação já está neste repositório; nada do que a
-resolve está.
+Uma plataforma de cotação de seguro auto que funciona mal: consulta três seguradoras parceiras em série, aguarda sem timeout configurado e devolve erro inteiro quando qualquer uma falha. Tudo o que é preciso para reproduzir essa degradação já está neste repositório; nada do que a resolve está.
 
-A entrega são duas peças que valem uma só: um **SAD** (Solution Architecture Document) que decide e
-justifica, e um **PoC** que implementa a fatia decidida e prova, com evidência medida por você, que
-ela funciona. O documento vem primeiro, o código é subordinado a ele. Reserve de **8 a 12 horas**.
+A entrega são duas peças que valem por uma só: um SAD (Solution Architecture Document) que decide e justifica, e um PoC que implementa a fatia decidida e prova, com evidência medida por você, que ela funciona. O documento vem primeiro; o código é subordinado a ele.
 
 ## O que você vai entregar
 
