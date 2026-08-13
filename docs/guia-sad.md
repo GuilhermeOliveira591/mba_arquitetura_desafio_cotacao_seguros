@@ -66,6 +66,13 @@ diga o que o fallback devolve, como o cliente sabe que aquilo é fallback, e com
 auditável. O C4 de nível 3 mora aqui, cobrindo a fatia protegida: `internal/partner/client.go` e
 `internal/quotation/service.go`.
 
+As consequências ruins incluem o que você **não** resolveu, e é por isso que o aceite pede quatro
+limites conhecidos declarados, com o gatilho que expõe cada um e o efeito na corretora. Nenhum deles
+é para implementar — a fronteira entre o que a arquitetura cobre e o que ela deixa de fora faz parte
+da arquitetura, e limite calado é o que vira incidente às 3h da manhã com o plantonista descobrindo
+sozinho. Declarar que o seu breaker vive na memória do processo, e portanto que cada réplica aprende
+sozinha que a parceira caiu, vale mais do que uma seção a mais sobre o que você implementou.
+
 - **Não conta:** "usaremos circuit breaker" sem os três estados, sem limiar e sem janela. É
   exatamente a frase que este desafio existe para tornar impossível.
 
@@ -100,7 +107,12 @@ dinheiro e latência, perder o registro de auditoria é infração regulatória.
 cenários: (a) o Redis inteiro se perde; (b) uma parceira fica fora por seis horas; (c) perda do site
 ou da região. Para cada um: o que a corretora vê, o que **degrada** e o que **para** (não é a mesma
 coisa), quanto custa em reais o modo degradado, e o caminho de volta. O cenário (a) tem endereço na
-seção 8: cache vazio é 100% das consultas compradas de novo.
+seção 8: cache vazio é 100% das consultas compradas de novo. Mas ele não para na conta, e é aí que o
+cenário fica interessante: as mesmas consultas que voltam a ser compradas voltam a ser **feitas ao
+mesmo tempo**, e o volume que chega às parceiras mais que dobra a partir de 50% de acerto. A
+`partner-degrading` afunda acima de cinco chamadas simultâneas, até o teto de 6000 ms. Perder o Redis,
+portanto, não é só ficar mais caro: é empurrar uma parceira para o colapso. Diga qual dos dois efeitos
+chega primeiro e o que a corretora vê enquanto isso.
 
 - **Não conta:** um RPO único para todas as classes de dado. É sinal de que a seção não foi pensada.
 
@@ -112,8 +124,13 @@ parceiro por cenário**: uma linha para hoje (hit rate zero) e uma para cada hit
 TTL sustenta, com hit rate assumido, consultas compradas por mês, custo mensal, economia contra hoje
 e percentual da receita. Segunda, **o custo da infraestrutura que você acrescenta**: Redis, retenção
 de traces e métricas, e o armazenamento de auditoria, que **cresce todo mês** e precisa de cinco
-anos, então mostre pelo menos o ano 1 e o ano 5. Terceira, **pessoal**: quantas pessoas, quais
-papéis, para construir e depois para operar, com custo mensal. Quarta, **o veredito**: o cache se
+anos, então mostre pelo menos o ano 1 e o ano 5. A unidade da auditoria é **cotação apresentada**, não
+consulta comprada, e a distância entre as duas é o ponto: o cache derruba a consulta e não derruba o
+registro, porque cotação servida de cache continua sendo cotação apresentada a um consumidor. Quem
+dimensionar o acervo pelas consultas que sobraram erra para baixo pelo inverso do hit rate, o que com
+60% de acerto é 2,5 vezes, e erra mais em reais justamente no ano 5, quando os cinco anos estão todos
+guardados ao mesmo tempo. Terceira, **pessoal**: quantas pessoas, quais papéis, para construir e
+depois para operar, com custo mensal. Quarta, **o veredito**: o cache se
 paga, em quanto tempo? Se a resposta for "não", diga; um SAD que conclui contra a solução preferida,
 com a conta na mão, vale mais que um que conclui a favor sem ela.
 

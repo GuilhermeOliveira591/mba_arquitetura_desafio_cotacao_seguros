@@ -93,7 +93,9 @@ O que se avalia é a decisão defendida com número, não a quantidade de padrõ
 - Persistência de auditoria de verdade. A auditoria é decisão de arquitetura no SAD e custo na seção 8,
   não uma tabela para você criar.
 - Garantia transacional entre cache e parceira, e qualquer discussão de concorrência além da que a
-  paralelização da agregação exigir.
+  paralelização da agregação exigir. Duas requisições concorrentes da mesma corretora para a mesma
+  placa, uma servida de cache e a outra da parceira, devolvem dois prêmios diferentes para o mesmo
+  risco no mesmo minuto: é um bom assunto de SAD, e vale citar, mas não é código desta entrega.
 - Integração real com qualquer seguradora. As três parceiras são e continuam mocks.
 - Corrigir bugs pré-existentes que não sejam os quatro buracos declarados.
 - Interface de usuário, cadastro de corretoras, cobrança, relatório para o corretor.
@@ -191,7 +193,9 @@ Nenhum deles está escondido: todos estão comentados no próprio código.
    sobe e emite só telemetria genérica (HTTP de entrada, HTTP de saída, runtime do Go).
 
 Isso é o enunciado, não um esquecimento. Não abra issue nem PR no repositório de origem "corrigindo" o
-código: preencher esses quatro buracos, com justificativa e com prova, **é a sua entrega**.
+código: fechar esses buracos, com justificativa e com prova, **é a sua entrega**. Três deles são
+obrigatórios; o segundo, a agregação em série, é o único opcional, e está no
+[bônus](#bônus-opcional) porque muda os seus números de p95 sem mudar o que se avalia.
 
 ### 5. O resto, na ordem
 
@@ -309,6 +313,14 @@ meio aberto deixa passar, o que fecha e o que reabre. E o comportamento se testa
 sorte**: a rajada de nove falhas nas sequências 49 a 57 da `partner-flaky` diz de antemão onde o breaker
 deve abrir.
 
+**O timeout faz parte deste mecanismo, e é obrigatório.** Um breaker que conta só falha nunca abre para
+a `partner-degrading`, porque ela não falha: ela afunda, somando 300 ms por chamada simultânea acima de
+cinco, até o teto de 6000 ms. Sem um teto de espera, a lentidão dela não vira sinal para contador
+nenhum, e a plataforma vai acumulando chamadas abertas que a deixam mais lenta ainda, num laço que não
+se desfaz sozinho quando a causa passa. Defina o `Timeout` do cliente em `internal/partner/client.go`,
+defenda o valor no SAD, e diga se o estouro conta como falha para o breaker: é essa decisão que faz a
+parceira lenta ser vista pelo mecanismo que você construiu.
+
 - **Não conta:** biblioteca importada e configurada sem uma única evidência de transição de estado. É a
   versão em código da frase "usaremos circuit breaker".
 
@@ -391,14 +403,13 @@ venha dos defaults e que `make smoke` siga verde.
 
 ### Bônus (opcional)
 
-Feche o obrigatório antes de olhar para cá. Estes dois acréscimos não contam para nenhum critério de
-aceite, e a ausência deles não tira nada da entrega:
+Feche o obrigatório antes de olhar para cá. Este acréscimo não conta para nenhum critério de aceite, e
+a ausência dele não tira nada da entrega:
 
-- ☐ (opcional) **timeout** na chamada à parceira, com o valor defendido no SAD
 - ☐ (opcional) **paralelização da agregação**, sobrepondo as três parceiras em vez de somá-las
 
-Os dois mudam os seus números de p95, então, se implementar, trate-os como qualquer outra decisão:
-contexto, opções, escolha e consequências no SAD.
+Ele muda os seus números de p95, então, se implementar, trate-o como qualquer outra decisão: contexto,
+opções, escolha e consequências no SAD.
 
 ## As evidências
 
@@ -419,7 +430,7 @@ diferentes não compara nada.
 | Trace com breaker aberto | screenshot ou export JSON do Jaeger | a requisição que **não chamou** a parceira curto-circuitada, e respondeu rápido |
 | Trace servido de cache | screenshot ou export JSON do Jaeger | a cotação sem os spans de saída para as parceiras |
 | Estado do breaker no tempo | gráfico **com a consulta PromQL colada como texto** | o degrau fechado → aberto → meio aberto → fechado |
-| Hit rate do cache | gráfico **com a consulta** | a curva subindo conforme o cache aquece |
+| Hit rate do cache | gráfico **com a consulta** | a curva subindo conforme o cache aquece. O valor daqui é propriedade da carga, não da produção: o hit rate da seção 8 sai do seu pressuposto de recotação |
 | p95 do `POST /quotes` | gráfico **com a consulta**, um por execução | o valor no "antes" e o no "depois", na mesma escala e com a janela declarada |
 
 Três regras de formato decidem se a evidência é verificável:
@@ -464,15 +475,17 @@ mínimo em tudo é uma entrega aprovável, não é uma entrega boa.
 - ☐ 3 pressupostos com valor, origem e consequência se forem falsos (seção 1 do SAD)
 - ☐ 4 diagramas C4 em Mermaid: nível 1, nível 2 do "antes", nível 2 do "depois" e nível 3 da fatia implementada (seções 2 e 4 do SAD)
 - ☐ 4 decisões no formato contexto → opções → escolha → consequências, cada uma com ao menos uma alternativa descartada e as consequências ruins: circuit breaker, cache, fallback e hospedagem (seções 4 e 5 do SAD)
+- ☐ 4 limites conhecidos que a sua entrega **não** resolve, cada um com o gatilho que o expõe e o efeito na corretora, nenhum deles para implementar: a ausência de limite de chamadas simultâneas por parceira, o breaker que vive na memória do processo e não atravessa réplicas, o TTL como única forma de invalidar o cache, e uma corretora consumindo a capacidade das outras (seção 4 do SAD)
 - ☐ 3 alertas com métrica, limiar e ação (seção 6 do SAD)
 - ☐ 1 runbook completo, do sintoma ao escalonamento (seção 6 do SAD)
 - ☐ 3 cenários de desastre, com efeito no cliente, custo do modo degradado e caminho de volta: Redis perdido, parceira fora por seis horas, perda do site ou da região (seção 7 do SAD)
 - ☐ 3 linhas na conta de parceiro: hoje, com hit rate zero, e ao menos 2 hit rates que o seu TTL sustente (seção 8 do SAD)
-- ☐ custo de auditoria projetado para o ano 1 e para o ano 5 (seção 8 do SAD)
+- ☐ custo de auditoria projetado para o ano 1 e para o ano 5, contado por **cotação apresentada** e não por consulta comprada (seção 8 do SAD)
 
 ### PoC
 
 - ☐ circuit breaker com os três estados nomeados no código, escopo declarado, e o estado aberto sem chamar a parceira
+- ☐ timeout na chamada à parceira, com o valor defendido no SAD e o efeito do estouro sobre o breaker declarado
 - ☐ cache com a chave escrita por extenso, contendo a corretora, e política de invalidação declarada
 - ☐ fallback implementado e refletido no contrato de resposta, com a degradação visível para quem chama
 - ☐ 3 métricas de negócio, com o nome declarado no README do processo: estado ou transição do breaker, `hit` e `miss` do cache, latência por parceira
@@ -517,6 +530,13 @@ existe. O segundo tropeço é a chave de cache, que quase sempre nasce a partir 
 corpo não tem a corretora, porque ela viaja no cabeçalho. É por isso que esse defeito reprova sozinho: é
 fácil de cometer e invisível em teste com um inquilino só. Escreva a chave por extenso antes de escrever a
 função que a monta.
+
+O terceiro tropeço é aritmético. A carga padrão repete cinco cotações ao longo de duzentas e dez
+requisições, então o hit rate que você vai ver no gráfico beira 98% e não descreve produção nenhuma.
+Aquele gráfico prova que a métrica existe e que o cache aquece, e é só para isso que ele é pedido; o
+hit rate que sustenta a planilha da seção 8 é outro número, e sai do seu pressuposto de recotação da
+seção 1. Levar o valor medido para a conta de economia é a maneira mais rápida de perder a coerência
+entre as seções 1, 4 e 8, que é justamente o que a correção procura.
 
 Os seus instrumentos de depuração estão prontos e são mais rápidos que a UI para as primeiras perguntas:
 `X-Partner-Seq` e `X-Partner-Inflight` dizem em que ponto da sequência determinística você está e quantas

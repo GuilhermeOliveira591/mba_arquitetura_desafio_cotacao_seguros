@@ -206,3 +206,12 @@ Antes de tocar em qualquer código, salve:
 
 É contra esses três artefatos que a sua entrega vai ser comparada — inclusive por você, quando rodar
 o mesmo `make reproduce` depois do circuit breaker de pé.
+
+Uma advertência sobre essa comparação, porque ela não é ingênua: o `loadgen` é de **laço fechado**,
+com um número fixo de requisições em voo (50, no padrão). Quando a sua entrega derrubar a latência,
+os mesmos 50 workers passam a disparar mais requisições por segundo, e a `partner-degrading` vai
+receber mais chamadas simultâneas do que recebia no "antes". É esperado, então, que ela apareça
+**pior** no "depois", e isso não é regressão da sua arquitetura: é o gerador de carga andando mais
+rápido porque você o desbloqueou. O que se compara entre as duas execuções é a taxa de sucesso, o p95
+da ponta e a vazão, não a latência isolada da parceira que afunda. Se você quiser separar os dois
+efeitos, rode também uma variação com `-concurrency` menor e diga no SAD que rodou.
