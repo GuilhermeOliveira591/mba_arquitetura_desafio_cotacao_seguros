@@ -1,4 +1,4 @@
-# SAD — Prumo Cota (plataforma de cotação de seguro auto)
+# SAD: Prumo Cota (plataforma de cotação de seguro auto)
 
 ## 1. Introdução
 
